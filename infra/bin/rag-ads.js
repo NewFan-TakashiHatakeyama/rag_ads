@@ -33,9 +33,10 @@ const awsEnv = {
 };
 
 const dataStack = new DataStack(app, n.stack('Data'), { env: awsEnv, naming: n });
+const serviceApiKey = app.node.tryGetContext('serviceApiKey') ?? process.env.RAG_ADS_SERVICE_API_KEY ?? undefined;
 const apiStack = new ApiStack(app, n.stack('Api'), {
   env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins,
-  embedModelId, embedProvider, embedDimension, geminiApiKey,
+  embedModelId, embedProvider, embedDimension, geminiApiKey, serviceApiKey,
 });
 apiStack.addDependency(dataStack);
 const batchStack = new BatchStack(app, n.stack('Batch'), {

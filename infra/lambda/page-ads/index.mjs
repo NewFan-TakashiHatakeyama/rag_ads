@@ -32,7 +32,8 @@ export const handler = async (event) => {
   });
 
   try {
-    if (!/^[0-9a-f]{8,64}$/i.test(pageId)) return respond([]);
+    // pageId は媒体の assistantMessage.messageId(英数・-・_)を許容(決定C)
+    if (!/^[0-9a-zA-Z_-]{8,64}$/.test(pageId)) return respond([]);
 
     const q = await ddb.send(new QueryCommand({
       TableName: TABLE_PLACEMENTS,

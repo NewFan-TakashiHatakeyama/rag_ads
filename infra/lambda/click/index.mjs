@@ -29,7 +29,8 @@ export const handler = async (event) => {
   const slotNum = Number(slot);
   try {
     // 入力の健全性チェック(枠数上限の正はPlacementの実在確認。slotは常識的範囲のみ検査)
-    if (!/^[0-9a-f]{8,64}$/i.test(pageId) || !Number.isInteger(slotNum) || slotNum < 1 || slotNum > 99) {
+    // pageId は媒体の messageId 形式(英数・-・_)を許容(決定C)
+    if (!/^[0-9a-zA-Z_-]{8,64}$/.test(pageId) || !Number.isInteger(slotNum) || slotNum < 1 || slotNum > 99) {
       log('WARN', 'click', { code: 'ADS-3001', msg: 'invalid pageId/slot' });
       return redirect(SITE_TOP);
     }

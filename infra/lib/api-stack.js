@@ -86,6 +86,13 @@ class ApiStack extends Stack {
         description: `RAG-Ads 設定パラメータ(DD-001 表6): ${key}`,
       });
     }
+    // 生成エンドポイントのサービス間APIキー(媒体NewFan-Financeが X-Api-Key で提示)。
+    // デプロイ後に運用側で実値へ更新(SecureStringへの変更・ローテーション推奨)。
+    new ssm.StringParameter(this, 'ServiceApiKey', {
+      parameterName: n.ssmParam('service_api_key'),
+      stringValue: props.serviceApiKey ?? 'CHANGE_ME_service_api_key',
+      description: 'RAG-Ads 生成エンドポイントのサービス間APIキー(要ローテーション)',
+    });
 
     // ---- Lambda共通 ----
     const lambdaDefaults = (fnKey, entryDir, extraEnv = {}) => ({
@@ -131,6 +138,28 @@ class ApiStack extends Stack {
     placementsTable.grantReadWriteData(this.clickFn);
     dailyStatsTable.grantWriteData(this.clickFn);
 
+    // 広告生成エンドポイント(サービス方式。DD-001 3.2 G-1〜G-10)。媒体の回答生成が呼ぶ
+    this.generateAdsFn = new lambda.Function(this, 'GenerateAdsFn', {
+      ...lambdaDefaults('generateAds', 'generate-ads', contentsTable ? { [n.envVars.TABLE_CONTENTS]: contentsTable.tableName } : {}),
+      timeout: Duration.seconds(29),
+      memorySize: 512,
+    });
+    masterTable.grantReadData(this.generateAdsFn);
+    placementsTable.grantReadWriteData(this.generateAdsFn);
+    dailyStatsTable.grantReadWriteData(this.generateAdsFn);
+    if (contentsTable) contentsTable.grantReadData(this.generateAdsFn);
+    this.generateAdsFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'SsmRead', actions: ['ssm:GetParametersByPath', 'ssm:GetParameter'],
+      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${n.ssmPrefix}/*`],
+    }));
+    this.generateAdsFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'BedrockInvoke', actions: ['bedrock:InvokeModel'], resources: ['*'], // 埋め込み+リード文生成
+    }));
+    this.generateAdsFn.addToRolePolicy(new iam.PolicyStatement({
+      // 候補検索(QueryVectorsはGetVectorsも要求する)
+      sid: 'VectorQuery', actions: ['s3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex'], resources: ['*'],
+    }));
+
     // 広告管理API(6.3節)。広告CRUD・審査・紐づけ・レポート+ベクトル同期・スクリーニング
     this.adminApiFn = new lambda.Function(this, 'AdminApiFn', {
       ...lambdaDefaults('adminApi', 'admin-api'),
@@ -167,7 +196,7 @@ class ApiStack extends Stack {
       corsPreflight: {
         allowOrigins: props.corsOrigins ?? ['*'],
         allowMethods: [apigwv2.CorsHttpMethod.ANY],
-        allowHeaders: ['Authorization', 'Content-Type'],
+        allowHeaders: ['Authorization', 'Content-Type', 'X-Api-Key'],
       },
     });
     const jwtAuthorizer = new authorizers.HttpJwtAuthorizer('JwtAuth',
@@ -176,11 +205,13 @@ class ApiStack extends Stack {
 
     const pageAdsIntegration = new integrations.HttpLambdaIntegration('PageAdsInt', this.pageAdsFn);
     const clickIntegration = new integrations.HttpLambdaIntegration('ClickInt', this.clickFn);
+    const generateIntegration = new integrations.HttpLambdaIntegration('GenerateInt', this.generateAdsFn);
     const adminIntegration = new integrations.HttpLambdaIntegration('AdminInt', this.adminApiFn);
 
-    // 配信系(公開)
+    // 配信系(公開)。生成はサービス間APIキー認証(Lambda内)
     this.httpApi.addRoutes({ path: '/v1/pages/{pageId}/ads', methods: [apigwv2.HttpMethod.GET], integration: pageAdsIntegration });
     this.httpApi.addRoutes({ path: '/r/{pageId}/{slot}', methods: [apigwv2.HttpMethod.GET], integration: clickIntegration });
+    this.httpApi.addRoutes({ path: '/v1/pages/{pageId}/generate-ads', methods: [apigwv2.HttpMethod.POST], integration: generateIntegration });
 
     // 管理系(Cognito JWT必須。7.1節のエンドポイント一式)。
     // 注意: ANYはOPTIONSも捕捉しオーソライザがプリフライトを401にするため、実メソッドのみ列挙し

@@ -29,6 +29,7 @@ function naming(env) {
     lambdas: {
       pageAds: `rag-ads_page-ads-${env}`,
       click: `rag-ads_click-${env}`,
+      generateAds: `rag-ads_generate-ads-${env}`,
       adminApi: `rag-ads_admin-api-${env}`,
       dailyAgg: `rag-ads_daily-agg-${env}`,
       vectorSyncRetry: `rag-ads_vector-sync-retry-${env}`,

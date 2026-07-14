@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NewFan-Finance | AI金融ニュース・分析</title>
+<link rel="stylesheet" href="/site/site.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="logo" href="/">NewFan<span>-Finance</span></a>
+  <nav><a href="/">ホーム</a><a href="javascript:void(0)">発見</a><a href="javascript:void(0)">ライブラリ</a></nav>
+</header>
+<div class="container">
+  <div class="hero">
+    <h1>お金の疑問に、AIが記事を根拠に答えます</h1>
+    <p>NewFan-Finance のAIアシスタントが、専門記事を検索して回答を作成します（PoCデモ環境）</p>
+  </div>
+  <div class="ask-box">
+    <input id="q" placeholder="例）日銀の追加利上げは住宅ローン金利にどう影響しますか？" maxlength="500">
+    <button id="ask">質問する</button>
+  </div>
+  <div class="samples" id="samples">
+    <button>日銀の追加利上げは住宅ローン金利にどう影響しますか？</button>
+    <button>住宅ローンの借り換えを検討したいのですが、何から始めるべきですか？</button>
+    <button>変動金利と固定金利、どちらを選ぶのがおすすめですか？</button>
+    <button>つみたてNISAを始めたいので口座開設の方法を教えてください</button>
+    <button>外貨預金の金利が高いのは何かリスクがあるからですか？</button>
+    <button>インフレで家計が苦しいときに見直すべき固定費は？</button>
+  </div>
+  <div class="loading-note" id="loading" style="display:none">回答を生成しています…</div>
+  <div class="recent" id="recent" style="display:none">
+    <h2>最近の回答ページ</h2>
+    <div id="recent-list"></div>
+  </div>
+</div>
+<script src="/site/home.js"></script>
+</body>
+</html>

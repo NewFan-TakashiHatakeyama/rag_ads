@@ -1,0 +1,17 @@
+{
+  "name": "rag-ads-poc",
+  "version": "1.0.0",
+  "description": "RAG広告配信システム PoC (NF-RAGAD-BD-001 / DD-001 / SD-001 準拠のローカル実行版)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "seed": "node server/seed.js --reset",
+    "batch:daily-agg": "node server/batch.js",
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

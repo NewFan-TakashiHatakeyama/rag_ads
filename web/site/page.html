@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NewFan-Finance | 回答ページ</title>
+<link rel="stylesheet" href="/site/site.css">
+</head>
+<body class="answer-page">
+
+<!-- 左サイドレール(本番UI準拠。既存サイト側の領域であり本PoCでは装飾) -->
+<aside class="rail" aria-label="サイトナビゲーション">
+  <a class="rail-logo" href="/" aria-label="NewFan-Finance ホーム">
+    <svg viewBox="0 0 24 24" width="26" height="26"><path d="M12 2 L22 12 L12 22 L2 12 Z" fill="#16325C"/><path d="M12 6 L18 12 L12 18 L6 12 Z" fill="#7EB3E8"/></svg>
+  </a>
+  <nav class="rail-nav">
+    <a href="/" class="on" title="ホーム" aria-label="ホーム">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 L12 4 L21 11.5"/><path d="M6 10.5 V20 H18 V10.5"/></svg>
+    </a>
+    <a href="/" title="発見" aria-label="発見">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 L21 21"/></svg>
+    </a>
+    <a href="/" title="ライブラリ" aria-label="ライブラリ">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4 H11 V20 H4 Z"/><path d="M13 4 H20 V20 H13 Z"/></svg>
+    </a>
+  </nav>
+</aside>
+
+<div class="page-wrap">
+  <!-- 上部バー(時刻・質問タイトル・操作アイコンは既存サイト準拠の装飾) -->
+  <header class="topbar">
+    <span class="tb-ts" id="page-ts">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7 V12 L15.5 14"/></svg>
+      <span id="page-ts-text"></span>
+    </span>
+    <span class="tb-title" id="topbar-title"></span>
+    <span class="tb-actions">
+      <button type="button" title="共有(デモでは無効)" aria-label="共有">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15 V4"/><path d="M8 8 L12 4 L16 8"/><path d="M5 13 V19 H19 V13"/></svg>
+      </button>
+      <button type="button" class="danger" title="削除(デモでは無効)" aria-label="削除">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7 H20"/><path d="M9 7 V4 H15 V7"/><path d="M6 7 L7 20 H17 L18 7"/></svg>
+      </button>
+    </span>
+  </header>
+
+  <div class="content-grid">
+    <main id="page-body" class="thread"><div class="loading-note">読み込み中…</div></main>
+    <!-- 右レール(既存サイトの機能。PoCでは装飾) -->
+    <aside class="side-tools" aria-hidden="true">
+      <button type="button">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17 L9 13 L13 16 L17 12 L20 15"/></svg>
+        Search images <span class="plus">＋</span>
+      </button>
+      <button type="button">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10 L21 7 V17 L16 14"/></svg>
+        Search videos <span class="plus">＋</span>
+      </button>
+    </aside>
+  </div>
+</div>
+
+<script src="/site/adslot.js"></script>
+<script src="/site/page.js"></script>
+</body>
+</html>

@@ -1,100 +1,101 @@
 /**
- * rag-ads_daily-agg: 日次集計バッチ(DD-001 9.1節。EventBridge 04:00 JST起動)
- * 前日分の確定値(citations/cost/citationChars)をPlacement走査から再計算して上書きする(冪等)。
- * 表示・クリックは速報値を保持し、確定処理では上書きしない(9.1節)。
+ * rag-ads_daily-agg: 日次集計バッチ(DD-001 9.1〜9.2節。EventBridge 04:00 JST起動)
+ *  ① 前日分の確定値(citations/cost/citationChars)をPlacement走査から再計算(冪等・
+ *     impressions/clicksは速報値を保持)。
+ *  ② 状態自動遷移(表10のシステム(自動)行):
+ *     - 期限切れ: campaignEnd < 当日 かつ (delivering|approved) → expired + DeleteVectors(9.2節)
+ *     - 配信開始: approved かつ campaignStart <= 当日 <= campaignEnd → delivering + PutVectors
+ *  配信可否の一次判定はS3 Vectorsメタデータフィルタ(期間・status)で行っているため、
+ *  バッチ遅延は配信誤りに直結しない二重防御の構成(9.2節)。
  *
- * 未移植(フェーズ1.5): 期限切れ・配信開始の自動遷移(9.2節)。
- *  - 期限切れの一次防御はS3 Vectorsメタデータフィルタ(期間・status)のため、
- *    遷移が未実装でも期限切れ広告が配信されることはない(二重防御構成。9.2節)。
+ * ローカルPoC server/batch.js(テスト検証済み)のロジックを実DynamoDB/S3 Vectors/Bedrockへ移植。
  */
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  getItem, query, updateItem,
+  embed, adEmbeddingText, putVector, deleteVector,
+  jstDate, jstDateOffset, nowIso, log,
+} from 'ragshared';
 
-const TABLE_MASTER = process.env.RAG_Ads_TABLE_MASTER;
-const TABLE_PLACEMENTS = process.env.RAG_Ads_TABLE_PLACEMENTS;
-const TABLE_STATS = process.env.RAG_Ads_TABLE_DAILY_STATS;
+const T_MASTER = process.env.RAG_Ads_TABLE_MASTER;
+const T_PLACEMENTS = process.env.RAG_Ads_TABLE_PLACEMENTS;
+const T_STATS = process.env.RAG_Ads_TABLE_DAILY_STATS;
 
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-
-const nowIso = () => new Date().toISOString();
-const jstDateOffset = (days) => new Date(Date.now() + 9 * 3600e3 + days * 86400e3).toISOString().slice(0, 10);
-const log = (level, event, fields = {}) =>
-  console.log(JSON.stringify({ ts: nowIso(), level, svc: 'daily_agg', event, ...fields }));
-
-/** JST日付 target のUTC時刻範囲(GSI1SK=TS#{createdAt}の走査に使用) */
-function utcRangeOfJstDate(target) {
-  const start = new Date(`${target}T00:00:00+09:00`).toISOString();
-  const end = new Date(new Date(`${target}T00:00:00+09:00`).getTime() + 86400e3).toISOString();
-  return { start: `TS#${start}`, end: `TS#${end}` };
+/** JST日付 target のUTC時刻範囲(Placement GSI1SK=TS#{createdAt}の走査に使用) */
+function utcTsRange(target) {
+  const startMs = new Date(`${target}T00:00:00+09:00`).getTime();
+  return { start: `TS#${new Date(startMs).toISOString()}`, end: `TS#${new Date(startMs + 86400000).toISOString()}` };
 }
 
-async function listAds() {
-  const ads = [];
-  let key;
-  do {
-    const r = await ddb.send(new ScanCommand({
-      TableName: TABLE_MASTER,
-      FilterExpression: 'SK = :meta',
-      ExpressionAttributeValues: { ':meta': 'META' },
-      ExclusiveStartKey: key,
-    }));
-    ads.push(...(r.Items ?? []));
-    key = r.LastEvaluatedKey;
-  } while (key);
-  return ads;
+/** ステータス別の広告一覧(GSI1: STATUS#{status}) */
+async function adsByStatus(status) {
+  return query(T_MASTER, `STATUS#${status}`, { indexName: 'GSI1' });
 }
 
-async function queryPlacements(adId, target) {
-  const { start, end } = utcRangeOfJstDate(target);
-  const items = [];
-  let key;
-  do {
-    const r = await ddb.send(new QueryCommand({
-      TableName: TABLE_PLACEMENTS,
-      IndexName: 'GSI1',
-      KeyConditionExpression: 'GSI1PK = :pk AND GSI1SK BETWEEN :s AND :e',
-      ExpressionAttributeValues: { ':pk': `AD#${adId}`, ':s': start, ':e': end },
-      ExclusiveStartKey: key,
-    }));
-    items.push(...(r.Items ?? []));
-    key = r.LastEvaluatedKey;
-  } while (key);
-  return items;
+/** ベクトル同期: delivering はPut(埋め込み生成)、それ以外はDelete。失敗はログのみ(9.2節: 本番はDLQ) */
+async function syncVector(ad) {
+  try {
+    if (ad.status === 'delivering') await putVector(ad, await embed(adEmbeddingText(ad)));
+    else await deleteVector(ad.adId);
+  } catch (e) {
+    log('ERROR', 'daily_agg', 'vector_sync_failed', { adIds: [ad.adId], msg: e.message });
+  }
 }
 
 export const handler = async (event = {}) => {
   const target = event.date ?? jstDateOffset(-1); // 再実行時は日付指定可(9.1節)
+  const today = jstDate();
   const started = Date.now();
-  const ads = await listAds();
+
+  // ---- ① 確定値の再計算 ----
+  // 対象日に実績があり得るステータスの広告を集計対象とする
+  const aggAds = [...await adsByStatus('delivering'), ...await adsByStatus('paused'), ...await adsByStatus('expired')];
+  const { start, end } = utcTsRange(target);
   let finalized = 0;
-
-  for (const ad of ads) {
-    const items = await queryPlacements(ad.adId, target);
-    const existing = await ddb.send(new GetCommand({
-      TableName: TABLE_STATS, Key: { PK: `AD#${ad.adId}`, SK: `DATE#${target}` },
-    }));
-    if (items.length === 0 && !existing.Item) continue; // 実績なし・速報もなし
-
-    await ddb.send(new UpdateCommand({
-      TableName: TABLE_STATS,
-      Key: { PK: `AD#${ad.adId}`, SK: `DATE#${target}` },
-      // citations/cost/citationCharsのみ確定値で上書き。impressions/clicksは速報値を保持(9.1節)
-      UpdateExpression: 'SET adId = :adId, #d = :date, citations = :c, cost = :cost, citationChars = :chars, finalized = :t, updatedAt = :now',
-      ExpressionAttributeNames: { '#d': 'date' },
-      ExpressionAttributeValues: {
-        ':adId': ad.adId,
-        ':date': target,
-        ':c': items.length,
-        ':cost': items.reduce((s, p) => s + (p.billedAmount ?? 0), 0),
-        ':chars': items.reduce((s, p) => s + (p.citationChars ?? 0), 0),
-        ':t': true,
-        ':now': nowIso(),
+  for (const ad of aggAds) {
+    const items = await query(T_PLACEMENTS, `AD#${ad.adId}`, { indexName: 'GSI1', skBetween: [start, end] });
+    const existing = await getItem(T_STATS, { PK: `AD#${ad.adId}`, SK: `DATE#${target}` });
+    if (items.length === 0 && !existing) continue;
+    await updateItem(T_STATS, { PK: `AD#${ad.adId}`, SK: `DATE#${target}` }, {
+      set: {
+        adId: ad.adId, date: target,
+        citations: items.length,
+        cost: items.reduce((s, p) => s + (p.billedAmount ?? 0), 0),
+        citationChars: items.reduce((s, p) => s + (p.citationChars ?? 0), 0),
+        finalized: true, updatedAt: nowIso(),
       },
-    }));
+    });
     finalized++;
   }
+  log('INFO', 'daily_agg', 'agg_finalized', { msg: target, latencyMs: Date.now() - started });
 
-  const result = { target, finalized, ads: ads.length, latencyMs: Date.now() - started };
-  log('INFO', 'agg_finalized', result);
+  // ---- ② 状態自動遷移(表10のシステム(自動)行) ----
+  let expired = 0;
+  let started2 = 0;
+  const stamp = () => ({ GSI1SK: `UPDATED#${nowIso()}`, updatedAt: nowIso() });
+
+  // 期限切れ: campaignEnd < 当日(delivering / approved が対象)
+  for (const ad of [...await adsByStatus('delivering'), ...await adsByStatus('approved')]) {
+    if (ad.campaignEnd < today) {
+      const next = { ...ad, status: 'expired', GSI1PK: 'STATUS#expired', ...stamp() };
+      await updateItem(T_MASTER, { PK: `AD#${ad.adId}`, SK: 'META' }, { set: { status: 'expired', GSI1PK: 'STATUS#expired', GSI1SK: next.GSI1SK, updatedAt: next.updatedAt } });
+      await syncVector(next);
+      expired++;
+      log('INFO', 'daily_agg', 'ad_expired', { adIds: [ad.adId] });
+    }
+  }
+
+  // 配信開始: approved かつ 開始日到来・期間内 → delivering(ベクトルPut)
+  for (const ad of await adsByStatus('approved')) {
+    if (ad.campaignStart <= today && ad.campaignEnd >= today) {
+      const next = { ...ad, status: 'delivering', GSI1PK: 'STATUS#delivering', ...stamp() };
+      await updateItem(T_MASTER, { PK: `AD#${ad.adId}`, SK: 'META' }, { set: { status: 'delivering', GSI1PK: 'STATUS#delivering', GSI1SK: next.GSI1SK, updatedAt: next.updatedAt } });
+      await syncVector(next);
+      started2++;
+      log('INFO', 'daily_agg', 'ad_delivery_started', { adIds: [ad.adId] });
+    }
+  }
+
+  const result = { target, finalized, expired, started: started2, latencyMs: Date.now() - started };
+  log('INFO', 'daily_agg', 'done', result);
   return result;
 };

@@ -14,6 +14,7 @@ const cloudwatch = require('aws-cdk-lib/aws-cloudwatch');
 const cwActions = require('aws-cdk-lib/aws-cloudwatch-actions');
 const lambdaEventSources = require('aws-cdk-lib/aws-lambda-event-sources');
 const logs = require('aws-cdk-lib/aws-logs');
+const iam = require('aws-cdk-lib/aws-iam');
 
 class BatchStack extends Stack {
   constructor(scope, id, props) {
@@ -44,18 +45,35 @@ class BatchStack extends Stack {
         logGroupName: `/aws/lambda/${n.lambdas.dailyAgg}`,
         retention: logs.RetentionDays.THREE_MONTHS,
       }),
+      layers: [props.sharedLayer], // 共有ライブラリ(埋め込み・ベクトル同期・ストア)
       environment: {
         [n.envVars.TABLE_MASTER]: masterTable.tableName,
         [n.envVars.TABLE_PLACEMENTS]: placementsTable.tableName,
         [n.envVars.TABLE_DAILY_STATS]: dailyStatsTable.tableName,
         [n.envVars.ALERT_TOPIC_ARN]: this.alertsTopic.topicArn,
         [n.envVars.METRICS_NAMESPACE]: n.metricsNamespace,
+        [n.envVars.VECTOR_BUCKET]: props.vectorBucketName,
+        [n.envVars.VECTOR_INDEX]: n.s3.vectorIndex,
+        [n.envVars.SSM_PREFIX]: n.ssmPrefix,
+        RAG_Ads_EMBED_MODEL_ID: props.embedModelId ?? 'amazon.titan-embed-text-v2:0',
+        RAG_Ads_ENV: n.env,
       },
     });
     masterTable.grantReadWriteData(this.dailyAggFn);
     placementsTable.grantReadData(this.dailyAggFn);
     dailyStatsTable.grantReadWriteData(this.dailyAggFn);
     this.alertsTopic.grantPublish(this.dailyAggFn);
+    // 状態自動遷移のベクトル同期(9.2節): 配信開始でPut(要Bedrock埋め込み)、期限切れでDelete
+    this.dailyAggFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'VectorSync', actions: ['s3vectors:PutVectors', 's3vectors:DeleteVectors', 's3vectors:GetIndex'], resources: ['*'],
+    }));
+    this.dailyAggFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'BedrockEmbed', actions: ['bedrock:InvokeModel'], resources: ['*'],
+    }));
+    this.dailyAggFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'SsmRead', actions: ['ssm:GetParametersByPath', 'ssm:GetParameter'],
+      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${n.ssmPrefix}/*`],
+    }));
 
     // EventBridgeスケジュール: 毎日04:00 JST = 19:00 UTC(前日)
     new events.Rule(this, 'DailyAggSchedule', {

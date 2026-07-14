@@ -35,6 +35,7 @@ apiStack.addDependency(dataStack);
 const batchStack = new BatchStack(app, n.stack('Batch'), {
   env: awsEnv, naming: n, dataStack,
   pageAdsFn: apiStack.pageAdsFn, clickFn: apiStack.clickFn, adminApiFn: apiStack.adminApiFn,
+  sharedLayer: apiStack.sharedLayer, vectorBucketName, embedModelId,
 });
 batchStack.addDependency(apiStack);
 const frontStack = new FrontStack(app, n.stack('Front'), {

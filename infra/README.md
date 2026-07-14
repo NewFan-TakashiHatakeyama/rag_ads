@@ -48,8 +48,13 @@ bash scripts/create-demo-users.sh <UserPoolId> advertiser01@example.co.jp '<pw>'
 ## 現段階の実装状況(フェーズ1.5完了)
 
 - **配信系Lambda(page-ads / click)**: 完全実装。有効性判定・表示/クリック計測・オープンリダイレクト防止。
-- **日次集計Lambda(daily-agg)**: 確定値再計算(GSI1走査・冪等・impressions/clicks保持)。
-  期限切れ/配信開始の自動遷移は媒体側パイプライン移植とあわせて追加(一次防御はベクトルフィルタ)。
+- **日次集計Lambda(daily-agg)**: 確定値再計算(GSI1走査・冪等・impressions/clicks保持)に加え、
+  **状態自動遷移(表10のシステム(自動)行)を実装済み**:
+  - 期限切れ: campaignEnd < 当日 かつ (delivering|approved) → expired + DeleteVectors(9.2節)
+  - 配信開始: approved かつ 開始日到来・期間内 → delivering + PutVectors(Bedrock埋め込み)
+  一次防御はS3 Vectorsのメタデータフィルタ(期間・status)のため、バッチ遅延は配信誤りに直結しない
+  二重防御構成。共有レイヤー+S3 Vectors/Bedrock権限を付与。dev実AWSで3ケース(期限切れ/配信開始/
+  期間前待機)+冪等性を検証済み。
 - **管理API(admin-api)**: **全エンドポイント実装済み**(`server/adminApi.js`を実DynamoDB/S3 Vectors/Bedrockへ移植)。
   広告CRUD・表10ステータス遷移・ベクトル同期(承認Put/停止Delete)・スクリーニング・紐づけ・レポート・
   コンテンツ詳細・パラメータ。

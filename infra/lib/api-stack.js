@@ -111,6 +111,10 @@ class ApiStack extends Stack {
         [n.envVars.VECTOR_BUCKET]: props.vectorBucketName,
         [n.envVars.VECTOR_INDEX]: n.s3.vectorIndex,
         RAG_Ads_EMBED_MODEL_ID: props.embedModelId ?? 'amazon.titan-embed-text-v2:0',
+        // 埋め込みプロバイダ(媒体Gemini空間へ整合する際に gemini/3072 へ切替。既定は bedrock/1024)
+        RAG_Ads_EMBED_PROVIDER: props.embedProvider ?? 'bedrock',
+        RAG_Ads_EMBED_DIMENSION: String(props.embedDimension ?? 1024),
+        ...(props.geminiApiKey ? { RAG_Ads_GEMINI_API_KEY: props.geminiApiKey } : {}),
         RAG_Ads_ENV: n.env,
         ...extraEnv,
       },

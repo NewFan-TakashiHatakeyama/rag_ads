@@ -7,7 +7,7 @@
 export * from './util.mjs';
 export * from './config.mjs';
 export * from './store.mjs';
-export * from './embeddings.mjs';
+export * from './embeddings.mjs'; // embed, embedInfo, adEmbeddingText, contentEmbeddingText
 export * from './vector-index.mjs';
 export {
   classifyQuestion, screenAd, generateLeads, validateLead, leadNgHit, NG_DICTIONARY,

@@ -1,83 +1,43 @@
-# NewFan-Finance 媒体側繋ぎ込みキット(フェーズ2)
+# NewFan-Finance 媒体側繋ぎ込みキット
 
-finance.newfan.co.jp への RAG広告配信システム組み込み手順。
-既存システムへの変更は**次の3点に限定**される(NF-RAGAD-BD-001 3.4節)。
-**すべてフィーチャーフラグOFF(`/rag_ads/{env}/enabled = false`)のまま先行デプロイする**(DD-001 13.1/13.2 段階0)。
+finance.newfan.co.jp への RAG広告配信システム組み込みの**参照実装**。
+**すべてフィーチャーフラグOFF(`/rag_ads/{env}/enabled = false`)のまま先行導入する**(DD-001 13.2 段階0)。
 
----
+> ⚠️ **実コードベース(zip提供分)を精査し、設計書想定との乖離を反映済み。**
+> 詳細・意思決定事項は **[`HANDOVER_newfan-finance.md`](HANDOVER_newfan-finance.md)** を参照。
+> 設計書はPython回答生成Lambdaを想定していたが、実体は **Perplexica(Next.js/LangChain)** であり、
+> 記事埋め込みは **Gemini 3072次元**(広告システムのBedrock Titan 1024次元と非互換)。
 
-## 変更点1: 回答生成Lambdaへの ad_pipeline 組み込み
+## ファイル構成
 
-既存の回答生成Lambda(Python 3.12)に広告パイプライン(DD-001 3.2節 G-1〜G-10)を組み込む。
+| ファイル | 用途 |
+|---|---|
+| `HANDOVER_newfan-finance.md` | **引継ぎ資料(主文書)**。実態・改修3点・意思決定事項・API契約・段階公開 |
+| `newfan-finance/RagAds.tsx` | 既存 `src/components/RagAds.tsx`(ダミースタブ)の置換。Perplexica準拠の広告ブロック |
+| `newfan-finance/api-ads-route.ts` | `src/app/api/ads/[pageId]/route.ts` 新設。広告取得の同一オリジンプロキシ |
+| `newfan-finance/MessageBox.integration.md` | `MessageBox.tsx` の Related直上への挿入手順 |
+| `AdSlotBlock.tsx` / `AdSlotBlock.module.css` | 汎用React版(Perplexica以外のNext.js向け参考。実導入は `newfan-finance/RagAds.tsx` を使用) |
 
-- **移植元(仕様の正)**: 本リポジトリ `server/pipeline.js` / `server/llm.js` / `server/vector.js`。
-  ロジックはテスト48件(`tests/`。DD-001 12.3 IT-01〜IT-21相当)で検証済みであり、
-  Python移植時はこのテストケース一覧を検収基準として使用する。
-- **必須の振る舞い**(移植時に落としてはならないもの):
-  1. フラグOFF時はG-3以降を実行しない(SSM `/rag_ads/{env}/enabled`。5分キャッシュ)
-  2. 広告パイプラインの例外は回答生成へ伝播させない(全体をtry-except・広告なしで返す。3.4節)
-  3. 回答のストリーミング返却をブロックしない(並行実行。3.2節)
-  4. Placement保存は`attribute_not_exists(PK)`条件付きTransactWriteItemsで冪等(3.5節)
-  5. 予算計上は条件付き加算(`cost <= :limit - :u`)、保存失敗時は補償減算(4.2.2/3.5節)
-  6. 同一広告主は1ページ`max_per_advertiser`枠まで(**カウンタで実装**。Set存在判定は2以上で壊れる — ローカル実装のコードレビューで検出済みの不具合パターン)
-  7. リード文は生成後に検証(20〜60字・NG辞書・URL/HTML/改行・「広告」語)し、NG時はフォールバック定型文
-- **接続先**: DataStackの3テーブル(`rag_ads_*_{env}`)、S3 Vectors `rag-ads-index-{env}`、
-  Bedrock(`/rag_ads/{env}/lead.model_id`)。IAMは既存Lambda実行ロールへ最小権限で追加。
+## 媒体側改修(3点。BD-001 3.4節)
 
-## 変更点2: 回答生成レスポンスへの ads[] 付加
+1. **回答ページへの広告表示(FE-01)**: `newfan-finance/RagAds.tsx` で既存スタブを置換し、
+   `MessageBox.tsx` の Related直上へ挿入。広告取得プロキシ `api-ads-route.ts` を新設。
+2. **回答生成時の広告確定(パイプライン G-1〜G-10)**: 実行場所は要決定(引継ぎ資料 決定B)。
+   サービス方式(広告システムの生成エンドポイント呼び出し)を推奨。**仕様の正**はローカル実装
+   `server/pipeline.js` とテスト48件(`tests/`)。
+3. **(任意)回答レスポンスへの ads[] 付加**: 初回フェッチ省略の最適化(DD-001 2.5節)。
 
-回答確定時に以下のスキーマで`ads[]`を付加する(DD-001 6.2.1。0件時は`"ads": []`)。
-実装位置は既存レスポンス方式に合わせ、(a)ストリーム末尾のメタイベント、または(b)回答確定後のページ情報取得、のいずれか。
+## 着手前の決定事項(引継ぎ資料 3章)
 
-```json
-"ads": [
-  {
-    "slot": 1,
-    "adId": "01JZX8G4N0EXAMPLE",
-    "label": "広告",
-    "lead": "変動金利の見直しを検討中の方に、返済シミュレーションの無料相談があります。",
-    "title": "住宅ローン借り換え無料診断",
-    "imageUrl": "https://cdn.example.com/loan-checkup.jpg",
-    "clickUrl": "/r/4732574e907f.../1"
-  }
-]
-```
+- **決定A(最重要)**: 埋め込みモデルの整合。媒体Gemini 3072 と広告Bedrock Titan 1024 の非互換を
+  どう解消するか。広告システムは Gemini 3072 への切替に**対応済み**(`-c embedProvider=gemini
+  -c embedDimension=3072 -c geminiApiKey=...` + 広告インデックス3072再構築)。
+- **決定B**: 広告パイプラインの実行場所(サービス方式 / インライン)。
+- **決定C**: pageId の粒度(`assistantMessage.messageId` 推奨)。
+- **決定D**: 計測URL `/r/` の媒体ドメイン配置。
 
-## 変更点3: Next.jsフロントへの AdSlotBlock 配置
+## デプロイ・ロールバック
 
-1. `AdSlotBlock.tsx` と `AdSlotBlock.module.css` を既存リポジトリの `components/` へコピー
-2. 回答ページの **Related直上** に1箇所配置(DD-001 2.1節。回答本文・情報源・Relatedには手を加えない):
-
-```tsx
-import AdSlotBlock from '@/components/AdSlotBlock';
-
-{/* 情報源(Sources)と Related の間 = Related直上 */}
-<AdSlotBlock
-  pageId={pageId}
-  initialAds={generatedAds /* 初回生成応答のads[]。再訪ページではundefined */}
-  apiBase={process.env.NEXT_PUBLIC_RAG_ADS_API_BASE ?? ''}
-/>
-```
-
-挙動仕様(コンポーネント内に実装済み・ローカルPoCで実機検証済み):
-高さ予約(PC240/SP160px)→3秒タイムアウト→0件/失敗はブロックごと非表示・リトライなし・
-「広告」ラベル常時表示・全テキストエスケープ描画・`rel="nofollow sponsored noopener"`。
-
-## インフラ前提(媒体側で必要な設定)
-
-- **同一ドメイン配下へのルーティング**(DD-001 6.1節): `/v1/pages/*/ads` と `/r/*` を
-  `api.finance.newfan.co.jp`(または同等)へ向ける。CloudFrontのビヘイビア追加
-  またはAPI Gatewayカスタムドメインで実現。`apiBase`にそのベースURLを設定。
-- CORS: 別ドメイン運用の場合はApiStackの`corsOrigins`に`https://finance.newfan.co.jp`を設定。
-
-## デプロイ・公開手順(DD-001 13.2)
-
-| 段階 | 操作 | 判定基準 |
-|---|---|---|
-| 0 | 上記3点をフラグOFFのままリリース | スモーク通過・既存機能の無影響(レイテンシ・エラー率) |
-| 1 | `PUT /v1/params {"enabled": true}` + 社内アカウント限定 | 表示崩れなし・アラームなし3日間 |
-| 2 | pageIdハッシュで実トラフィック10% | AdFillRate・レイテンシ・エラー率が目標内で7日間 |
-| 3 | 100% | 検証運用(BD-001 11章)へ移行 |
-
-ロールバック一次手段はフラグOFF(即時・デプロイ不要。13.3節)。
-`enabled=false`の間も広告取得APIは空配列を返し、AdSlotBlockは自動的に非表示になる。
+- フラグOFFのまま導入 → スモーク → 段階1(社内ON)→ 段階2(10%)→ 段階3(100%)。
+- ロールバック一次手段は `PUT /v1/params {"enabled": false}`(即時)。OFF中は配信APIが空配列を返し
+  広告ブロックは自動非表示(媒体側変更なしで縮退)。

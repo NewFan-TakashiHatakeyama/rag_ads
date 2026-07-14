@@ -22,6 +22,16 @@ class BatchStack extends Stack {
     const n = props.naming;
     const { masterTable, placementsTable, dailyStatsTable, vectorSyncDlq } = props.dataStack;
 
+    // 共有レイヤーは各スタックで独立に作成する(クロススタックexport参照のデッドロックを避けるため)。
+    // アセットは同一(infra/lambda/layers/shared)。
+    const sharedLayer = new lambda.LayerVersion(this, 'SharedLayer', {
+      layerVersionName: `rag-ads_shared-batch-${n.env}`,
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'layers', 'shared')),
+      compatibleRuntimes: [lambda.Runtime.NODEJS_22_X],
+      compatibleArchitectures: [lambda.Architecture.ARM_64],
+      description: 'RAG-Ads 共有モジュール(Batchスタック用)',
+    });
+
     // ---- SNSトピック(表16) ----
     this.alertsTopic = new sns.Topic(this, 'AlertsTopic', {
       topicName: n.sns.alerts,
@@ -45,7 +55,7 @@ class BatchStack extends Stack {
         logGroupName: `/aws/lambda/${n.lambdas.dailyAgg}`,
         retention: logs.RetentionDays.THREE_MONTHS,
       }),
-      layers: [props.sharedLayer], // 共有ライブラリ(埋め込み・ベクトル同期・ストア)
+      layers: [sharedLayer], // 共有ライブラリ(埋め込み・ベクトル同期・ストア)。当スタック独自
       environment: {
         [n.envVars.TABLE_MASTER]: masterTable.tableName,
         [n.envVars.TABLE_PLACEMENTS]: placementsTable.tableName,
@@ -56,6 +66,9 @@ class BatchStack extends Stack {
         [n.envVars.VECTOR_INDEX]: n.s3.vectorIndex,
         [n.envVars.SSM_PREFIX]: n.ssmPrefix,
         RAG_Ads_EMBED_MODEL_ID: props.embedModelId ?? 'amazon.titan-embed-text-v2:0',
+        RAG_Ads_EMBED_PROVIDER: props.embedProvider ?? 'bedrock',
+        RAG_Ads_EMBED_DIMENSION: String(props.embedDimension ?? 1024),
+        ...(props.geminiApiKey ? { RAG_Ads_GEMINI_API_KEY: props.geminiApiKey } : {}),
         RAG_Ads_ENV: n.env,
       },
     });

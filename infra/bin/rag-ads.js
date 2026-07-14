@@ -21,6 +21,11 @@ const siteTopUrl = app.node.tryGetContext('siteTopUrl') ?? 'https://finance.newf
 const vectorBucketName = app.node.tryGetContext('vectorBucketName') ?? `rag-ads-vectors-${env}`;
 const corsOrigins = app.node.tryGetContext('corsOrigins') ?? ['*'];
 const embedModelId = app.node.tryGetContext('embedModelId') ?? 'amazon.titan-embed-text-v2:0';
+// 埋め込みプロバイダ整合(媒体Gemini空間へ揃える場合: -c embedProvider=gemini -c embedDimension=3072
+//  -c geminiApiKey=... とし、S3 Vectorsインデックスも3072で作り直す)。既定は自立稼働のbedrock/1024。
+const embedProvider = app.node.tryGetContext('embedProvider') ?? 'bedrock';
+const embedDimension = Number(app.node.tryGetContext('embedDimension') ?? 1024);
+const geminiApiKey = app.node.tryGetContext('geminiApiKey') ?? process.env.RAG_ADS_GEMINI_API_KEY ?? '';
 
 const awsEnv = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -29,13 +34,14 @@ const awsEnv = {
 
 const dataStack = new DataStack(app, n.stack('Data'), { env: awsEnv, naming: n });
 const apiStack = new ApiStack(app, n.stack('Api'), {
-  env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins, embedModelId,
+  env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins,
+  embedModelId, embedProvider, embedDimension, geminiApiKey,
 });
 apiStack.addDependency(dataStack);
 const batchStack = new BatchStack(app, n.stack('Batch'), {
   env: awsEnv, naming: n, dataStack,
   pageAdsFn: apiStack.pageAdsFn, clickFn: apiStack.clickFn, adminApiFn: apiStack.adminApiFn,
-  sharedLayer: apiStack.sharedLayer, vectorBucketName, embedModelId,
+  vectorBucketName, embedModelId, embedProvider, embedDimension, geminiApiKey,
 });
 batchStack.addDependency(apiStack);
 const frontStack = new FrontStack(app, n.stack('Front'), {

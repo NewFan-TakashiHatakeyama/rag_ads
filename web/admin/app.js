@@ -56,9 +56,10 @@ class ApiError extends Error {
 async function api(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (session.token) headers['Authorization'] = `Bearer ${session.token}`;
+  const base = window.RAGAuth?.apiBase ?? ''; // デプロイ時はAPI GatewayのベースURL
   let res;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, 'NETWORK', '時間をおいて再度お試しください');
   }
@@ -195,7 +196,7 @@ function renderShell(navKey, viewFn) {
       <main class="main" id="main"></main>
     </div>`;
   document.getElementById('btn-logout').addEventListener('click', async () => {
-    try { await api('POST', '/v1/auth/logout'); } catch { /* noop */ }
+    try { await window.RAGAuth.logout(session.token); } catch { /* noop */ }
     session.token = null; session.user = null;
     render();
   });
@@ -213,18 +214,18 @@ function renderLogin(msg = '') {
         <div class="field"><label>メールアドレス</label><input class="inp" id="login-email" type="email" autocomplete="username"></div>
         <div class="field"><label>パスワード</label><input class="inp" id="login-pass" type="password" autocomplete="current-password"></div>
         <button class="btn btn-p" id="btn-login" style="width:100%;justify-content:center">ログイン</button>
-        <div class="login-hint">
+        ${window.RAGAuth?.mode === 'local' ? `<div class="login-hint">
           <b>デモアカウント（PoC検証用）</b><br>
           広告主: <code>advertiser01@example.co.jp</code> / <code>demo1234</code><br>
           管理者: <code>admin@newfan.co.jp</code> / <code>admin1234</code>
-        </div>
+        </div>` : ''}
       </div>
     </div>`;
   const doLogin = async () => {
     const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-pass').value;
     try {
-      const r = await api('POST', '/v1/auth/login', { email, password });
+      const r = await window.RAGAuth.login(email, password);
       session.token = r.token; session.user = r.user;
       location.hash = '#/ads';
       render();
@@ -1136,8 +1137,8 @@ async function viewReview() {
 // ===== 起動 ==================================================================
 (async () => {
   if (session.token) {
-    try { const r = await api('GET', '/v1/auth/me'); session.user = r.user; }
-    catch { session.token = null; session.user = null; }
+    const user = await window.RAGAuth.validateToken(session.token);
+    if (user) session.user = user; else { session.token = null; session.user = null; }
   }
   render();
 })();

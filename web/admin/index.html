@@ -4,11 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NewFan RAG-Ads 管理コンソール</title>
-<link rel="stylesheet" href="/admin/styles.css">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div id="app"></div>
 <div id="toast-container"></div>
-<script src="/admin/app.js"></script>
+<!-- config.js はデプロイ時にFrontStackが実値(apiBase/Cognito)を注入。ローカルは空=簡易セッション -->
+<script src="config.js"></script>
+<script src="auth-adapter.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

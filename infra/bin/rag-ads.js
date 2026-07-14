@@ -37,8 +37,14 @@ const batchStack = new BatchStack(app, n.stack('Batch'), {
   pageAdsFn: apiStack.pageAdsFn, clickFn: apiStack.clickFn, adminApiFn: apiStack.adminApiFn,
 });
 batchStack.addDependency(apiStack);
-const frontStack = new FrontStack(app, n.stack('Front'), { env: awsEnv, naming: n });
+const frontStack = new FrontStack(app, n.stack('Front'), {
+  env: awsEnv, naming: n,
+  apiEndpoint: apiStack.httpApi.apiEndpoint,
+  userPoolId: apiStack.userPool.userPoolId,
+  userPoolClientId: apiStack.userPoolClient.userPoolClientId,
+});
 frontStack.addDependency(batchStack);
+frontStack.addDependency(apiStack);
 
 // 共通タグ(14.2節: Project/Env/ManagedBy)
 for (const [k, v] of Object.entries(n.tags)) {

@@ -41,9 +41,25 @@ class FrontStack extends Stack {
       priceClass: cloudfront.PriceClass.PRICE_CLASS_200, // 日本を含むリージョン
     });
 
-    // 現行SPA資産のデプロイ(Cognito認証への接続はadmin-api移植と同時に更新予定)
+    // ランタイム設定(config.js)を実値で注入。SPAはCognito USER_PASSWORD_AUTH +
+    // API Gateway(apiBase)へ接続する(auth-adapter.jsが参照)。
+    const configJs = [
+      '/* FrontStackが注入(cdk deploy時) */',
+      'window.RAG_ADS_CONFIG = {',
+      `  apiBase: ${JSON.stringify(props.apiEndpoint)},`,
+      `  region: ${JSON.stringify(this.region)},`,
+      `  userPoolId: ${JSON.stringify(props.userPoolId)},`,
+      `  userPoolClientId: ${JSON.stringify(props.userPoolClientId)}`,
+      '};',
+      '',
+    ].join('\n');
+
+    // SPA資産 + config.js上書き。sources順で後勝ち(config.jsは実値へ)
     new s3deploy.BucketDeployment(this, 'DeployAdminSpa', {
-      sources: [s3deploy.Source.asset(path.join(__dirname, '..', '..', 'web', 'admin'))],
+      sources: [
+        s3deploy.Source.asset(path.join(__dirname, '..', '..', 'web', 'admin')),
+        s3deploy.Source.data('config.js', configJs),
+      ],
       destinationBucket: this.adminBucket,
       distribution: this.distribution,
       distributionPaths: ['/*'],

@@ -33,8 +33,8 @@ export async function GET(
       { headers: { 'Cache-Control': 'no-store' } },
     );
 
-  // pageId形式チェック(広告システム側と同一: 英数ハッシュ)。不正は空配列
-  if (!RAG_ADS_API_BASE || !/^[0-9a-zA-Z]{8,64}$/.test(pageId)) return empty();
+  // pageId形式チェック(広告システム側と同一。決定C: assistantMessage.messageId=英数・-・_、8〜64字)。不正は空配列
+  if (!RAG_ADS_API_BASE || !/^[0-9a-zA-Z_-]{8,64}$/.test(pageId)) return empty();
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);

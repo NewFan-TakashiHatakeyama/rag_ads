@@ -141,7 +141,7 @@ test('IT-09: 同一pageIdで2回実行しても課金・Placementは1回分', ()
   const p = tables.placements.query(`PAGE#${PAGE}`);
   assert.equal(p.length, 1);
   assert.equal(stats(p[0].adId).citations, 1); // 二重計上なし
-  assert.equal(p[0].impressions, 2);           // 表示は返却ごとに計測(2.6節)
+  assert.equal(p[0].impressions, 0);           // 生成時は表示を計上しない(実表示はpage-adsフェッチ時のみ)
 });
 
 // IT-10 表示(全有効)
@@ -230,7 +230,7 @@ test('IT-19: 日次バッチの確定値がPlacement集計と一致する(冪等
   assert.equal(s1.finalized, true);
   assert.equal(s1.citations, 1);
   assert.equal(s1.cost, 12);
-  assert.ok(s1.impressions >= 2); // 生成時+表示時(確定処理は上書きしない)
+  assert.equal(s1.impressions, 1); // 表示時のみ計上(getPageAdsフェッチ1回。生成時は計上しない)
   assert.equal(s1.clicks, 1);
   const r2 = runDailyAgg(today);  // 再実行しても同一(冪等)
   const s2 = stats(a, today);

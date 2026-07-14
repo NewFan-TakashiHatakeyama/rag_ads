@@ -150,20 +150,6 @@ async function savePlacements(pageId, selected, leadMap, cls, today) {
   return items;
 }
 
-/** 表示計測(生成応答のads[]も1回の表示。2.6節) */
-async function recordImpressions(placements) {
-  const today = jstDate();
-  const now = nowIso();
-  for (const p of placements) {
-    await updateItem(T_PLACEMENTS, { PK: p.PK, SK: p.SK }, {
-      add: { impressions: 1 }, set: { lastViewedAt: now, ...(p.firstViewedAt ? {} : { firstViewedAt: now }) },
-    });
-    await updateItem(T_STATS, { PK: `AD#${p.adId}`, SK: `DATE#${today}` }, {
-      add: { impressions: 1 }, set: { updatedAt: now, adId: p.adId, date: today },
-    });
-  }
-}
-
 /** 有効性判定(冪等再返却時。3.3節) */
 async function filterAlive(placements) {
   const today = jstDate();
@@ -206,11 +192,11 @@ export const handler = async (event) => {
     const params = await getParams();
     if (!params.enabled) { log('INFO', 'ad_pipeline', 'pipeline_skipped', { pageId }); return respond([]); }
 
-    // 冪等性(3.5節): 既存Placementがあれば有効分を返す(課金なし)
+    // 冪等性(3.5節): 既存Placementがあれば有効分を返す(課金なし)。
+    // 表示計測は page-ads フェッチ時のみ(実表示計上)。生成応答では計上しない。
     const existing = await query(T_PLACEMENTS, `PAGE#${pageId}`, { skPrefix: 'SLOT#' });
     if (existing.length > 0) {
       const alive = await filterAlive(existing);
-      await recordImpressions(alive);
       return respond(alive.map(toAdCard));
     }
 
@@ -287,7 +273,6 @@ export const handler = async (event) => {
       if (e instanceof ConditionalCheckFailed) {
         await compensate(reserved, today);
         const alive = await filterAlive(await query(T_PLACEMENTS, `PAGE#${pageId}`, { skPrefix: 'SLOT#' }));
-        await recordImpressions(alive);
         return respond(alive.map(toAdCard));
       }
       await compensate(reserved, today);
@@ -296,7 +281,7 @@ export const handler = async (event) => {
     }
     log('INFO', 'ad_pipeline', 'placement_saved', { pageId, adIds: placements.map((p) => p.adId), latencyMs: Date.now() - started });
 
-    await recordImpressions(placements);
+    // 表示計測は page-ads フェッチ時のみ(実表示計上)。生成時は課金(citations)のみ計上し表示は計上しない。
     return respond(placements.map(toAdCard));
   } catch (e) {
     // あらゆる例外は広告なしで返す(回答生成を妨げない。3.4節)

@@ -68,11 +68,11 @@ export function runAdPipeline(input, deps = {}) {
       return [];
     }
     // 冪等性(3.5節): 同一pageIdのPlacementが既にあれば既存を返却(課金なし)。
-    // 返却は表示に使われるため、表示時と同じ有効性判定(3.3節)を適用する
+    // 返却は表示に使われるため、表示時と同じ有効性判定(3.3節)を適用する。
+    // 表示計測は page-ads フェッチ時のみ(実表示計上)。生成応答では計上しない。
     const existing = tables.placements.query(`PAGE#${input.pageId}`);
     if (existing.length > 0) {
       const alive = filterAlivePlacements(existing);
-      recordImpressions(alive);
       return alive.map(toAdCard);
     }
     return generateAndPlace(input, params, d, started);
@@ -167,7 +167,6 @@ function generateAndPlace(input, params, d, started) {
       // 競合で先に保存されていた場合: 今回の課金予約を補償し、既存を返す(3.5節)
       compensate(reserved, today);
       const alive = filterAlivePlacements(tables.placements.query(`PAGE#${pageId}`));
-      recordImpressions(alive);
       return alive.map(toAdCard);
     }
     compensate(reserved, today);
@@ -178,8 +177,7 @@ function generateAndPlace(input, params, d, started) {
     pageId, adIds: placements.map((p) => p.adId), latencyMs: Date.now() - started,
   });
 
-  // 生成応答のads[]も表示1回として計測する(2.6節)
-  recordImpressions(placements);
+  // 表示計測は page-ads フェッチ時のみ(実表示計上)。生成時は課金(citations)のみ計上し表示は計上しない。
   return placements.map(toAdCard);
 }
 

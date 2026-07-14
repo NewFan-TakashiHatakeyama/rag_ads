@@ -25,9 +25,13 @@ import RagAds from './RagAds';
 
 - 広告は**回答単位**で確定・課金されるため、`pageId` には回答ごとに一意な
   `section.assistantMessage.messageId` を用いることを推奨する（chatId は会話単位で粗い）。
-- 広告システムの配信API は `pageId` を `[0-9a-zA-Z]{8,64}` 想定で検証する。Perplexica の
-  messageId が16進以外を含む場合、広告システム側の pageId 検証を英数許容へ緩めるか、
-  媒体側で正規化する（本キットの `api-ads-route.ts` は英数許容で実装済み）。
+- 広告システムの配信API・生成API・計測URL・本キットのプロキシは、`pageId` を
+  **`[0-9a-zA-Z_-]{8,64}`(英数・ハイフン・アンダースコア)** で検証する(決定C対応済み)。
+  Perplexica の `assistantMessage.messageId` をそのまま渡してよい。
+- **重要**: RagAds の表示(page-ads)だけでは広告は出ない。回答生成時に広告システムの
+  **生成API `POST /v1/pages/{messageId}/generate-ads` を呼んで Placement を確定**する必要がある
+  (改修2)。参照実装は `chat-route-generate-ads.ts` を参照。**RagAds に渡す pageId と生成API の
+  pageId は必ず同一(`assistantMessage.messageId`)にする**こと。
 
 ## 3. 環境変数(.env / config)
 

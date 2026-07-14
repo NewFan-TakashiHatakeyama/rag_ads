@@ -62,6 +62,7 @@
 | 2 | 広告取得プロキシ | `src/app/api/ads/[pageId]/route.ts`(新設) | 同一オリジン化・CORS回避 |
 | 3 | クリック転送 | `next.config.mjs`(rewrite追加) | click計測(`/r/…`を広告システムへ) |
 | 4 | 生成API呼び出し | `src/lib/ads/finalizeAds.ts`(新設)・`api/chat/route.ts`(呼び出し) | 配信確定(Placement作成+課金) |
+| 5 | ロールアウトゲート | `src/lib/ads/rollout.ts`(新設)・`api/chat/route.ts`(生成をゲート) | **main=prod のため必須**。段階公開の対象制御。詳細は `ROLLOUT_newfan-finance-prod.md` |
 
 ---
 
@@ -281,6 +282,7 @@ RAG_ADS_SERVICE_API_KEY=<SSM /rag_ads/{env}/service_api_key の値>             
 
 ## 12. 参照
 
+- **本番反映・段階公開手順(フェーズB以降・main=prod前提)**: `integration/ROLLOUT_newfan-finance-prod.md`
 - API契約・広告システム状態: `integration/HANDOVER_newfan-finance.md`
 - ドロップイン参照実装: `integration/newfan-finance/RagAds.tsx` / `api-ads-route.ts` / `chat-route-generate-ads.ts` / `MessageBox.integration.md`
 - 媒体側 実コード確認箇所(2026-02-09 版 newfan_finance-main):

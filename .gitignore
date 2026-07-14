@@ -4,6 +4,11 @@ data/*.json
 .DS_Store
 infra/cdk.out/
 
+# 機密情報(AWS/Gemini/DBトークン等)は絶対にコミットしない
+.env
+.env.*
+!.env.example
+
 infra/deploy*.log
 infra/agg_out.json
 infra/cdk.context.json

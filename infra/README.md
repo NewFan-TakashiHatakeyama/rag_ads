@@ -41,7 +41,7 @@ bash scripts/create-demo-users.sh <UserPoolId> advertiser01@example.co.jp '<pw>'
 
 | 用途 | サービス・モデル | 備考 |
 |---|---|---|
-| 埋め込み | Bedrock Titan Embed v2(1024次元・正規化) | 記事・広告・質問で共用。S3 Vectorsインデックスと次元一致 |
+| 埋め込み | プラグイン式: Bedrock Titan Embed v2(1024) / **Gemini gemini-embedding-001(3072)** | 記事・広告・質問で共用。S3 Vectorsインデックスと次元一致必須。**現dev は決定A-1で Gemini/3072**(`-c embedProvider=gemini`) |
 | 質問分類/リード文/スクリーニング | Bedrock Claude Haiku 4.5(`jp.anthropic.claude-haiku-4-5-20251001-v1:0`) | **オンデマンド不可・推論プロファイル必須**。SSM `lead.model_id` |
 | ベクトル検索 | S3 Vectors `rag-ads-index-dev` | フィルタ status=delivering AND 期間内(期間はYYYYMMDD数値メタデータ) |
 
@@ -77,9 +77,13 @@ prodでは作らない)を作成する。シードは `node infra/scripts/seed-c
 
 ## θ_rel 較正(重要)
 
-**ローカルモック用の θ_rel=0.50 は実Titan埋め込みには不適**。dev実測(2026-07-14)では
-住宅ローン広告に対し関連質問が類似度0.32〜0.42・無関連が0.12未満に分布したため、初期値を
-**0.25** に較正済み(CDK default + dev SSM)。検証運用で継続チューニング(BD-001 11.2)。
+θ_rel は埋め込みプロバイダで分布が異なるため、CDK既定値を `-c embedProvider` に連動させている
+(`api-stack.js`)。dev実測(2026-07-14):
+- **bedrock/Titan(既定・自立稼働)**: 関連質問0.32〜0.42・無関連<0.12 → **θ_rel=0.25**
+- **gemini/3072(決定A-1・現dev)**: 関連質問0.74〜0.90・無関連0.56〜0.65 → **θ_rel=0.70**
+
+**現在の dev は決定A-1により Gemini/3072・θ_rel=0.70 へ移行済み**(手順は
+`integration/HANDOVER_newfan-finance.md` §8)。検証運用で継続チューニング(BD-001 11.2)。
 
 **運用上の留意**: SSMパラメータはCDK管理のため、`cdk deploy`が実行時チューニング値をCDK既定値へ
 上書きする。検証運用で頻繁にチューニングする段階に入ったら、チューニング対象パラメータ(theta_rel・

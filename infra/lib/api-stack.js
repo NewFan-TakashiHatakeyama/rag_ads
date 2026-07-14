@@ -79,7 +79,12 @@ class ApiStack extends Stack {
     }
 
     // ---- SSMパラメータ(表6。/rag_ads/{env}/…) ----
-    for (const [key, value] of Object.entries(DEFAULT_PARAMS)) {
+    // θ_relは埋め込みプロバイダで分布が異なるため既定値を連動させる(誤配信防止)。
+    //   bedrock/Titan: 関連0.32〜0.42・無関連<0.12 → 0.25
+    //   gemini/3072  : 関連0.74〜0.90・無関連0.56〜0.65 → 0.70(2026-07-14 dev実測)
+    const effectiveParams = { ...DEFAULT_PARAMS };
+    if ((props.embedProvider ?? 'bedrock') === 'gemini') effectiveParams['theta_rel'] = '0.70';
+    for (const [key, value] of Object.entries(effectiveParams)) {
       new ssm.StringParameter(this, `Param-${key.replace(/[^a-zA-Z0-9]/g, '-')}`, {
         parameterName: n.ssmParam(key),
         stringValue: value,

@@ -24,7 +24,9 @@ const embedModelId = app.node.tryGetContext('embedModelId') ?? 'amazon.titan-emb
 // 埋め込みプロバイダ整合(媒体Gemini空間へ揃える場合: -c embedProvider=gemini -c embedDimension=3072
 //  -c geminiApiKey=... とし、S3 Vectorsインデックスも3072で作り直す)。既定は自立稼働のbedrock/1024。
 const embedProvider = app.node.tryGetContext('embedProvider') ?? 'bedrock';
-const embedDimension = Number(app.node.tryGetContext('embedDimension') ?? 1024);
+// 出力次元は埋め込みプロバイダの既定に連動(gemini-embedding-001=3072 / Titan Embed v2=1024)。
+// -c embedDimension で明示上書き可。S3 Vectorsインデックスも同一次元で作る必要あり(create-vector-index.sh)。
+const embedDimension = Number(app.node.tryGetContext('embedDimension') ?? (embedProvider === 'gemini' ? 3072 : 1024));
 const geminiApiKey = app.node.tryGetContext('geminiApiKey') ?? process.env.RAG_ADS_GEMINI_API_KEY ?? '';
 
 const awsEnv = {

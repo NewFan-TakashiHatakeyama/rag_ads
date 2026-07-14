@@ -1,0 +1,11 @@
+{
+  "app": "node bin/rag-ads.js",
+  "context": {
+    "env": "dev",
+    "siteTopUrl": "https://finance.newfan.co.jp/",
+    "vectorBucketName": "rag-ads-vectors-dev",
+    "corsOrigins": ["*"],
+    "@aws-cdk/core:checkSecretUsage": true,
+    "aws-cdk:enableDiffNoFail": true
+  }
+}

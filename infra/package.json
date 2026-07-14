@@ -1,0 +1,17 @@
+{
+  "name": "rag-ads-infra",
+  "version": "1.0.0",
+  "description": "RAG広告配信システム IaC (NF-RAGAD-DD-001 13章)",
+  "private": true,
+  "scripts": {
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy:dev": "cdk deploy --all -c env=dev",
+    "deploy:prod": "cdk deploy --all -c env=prod"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1100.0",
+    "aws-cdk-lib": "^2.220.0",
+    "constructs": "^10.4.2"
+  }
+}

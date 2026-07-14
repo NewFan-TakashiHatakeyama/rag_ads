@@ -2,3 +2,8 @@ node_modules/
 data/*.json
 *.log
 .DS_Store
+infra/cdk.out/
+
+infra/deploy*.log
+infra/agg_out.json
+infra/cdk.context.json

@@ -52,7 +52,23 @@ bash scripts/create-demo-users.sh <UserPoolId> advertiser01@example.co.jp '<pw>'
   期限切れ/配信開始の自動遷移は媒体側パイプライン移植とあわせて追加(一次防御はベクトルフィルタ)。
 - **管理API(admin-api)**: **全エンドポイント実装済み**(`server/adminApi.js`を実DynamoDB/S3 Vectors/Bedrockへ移植)。
   広告CRUD・表10ステータス遷移・ベクトル同期(承認Put/停止Delete)・スクリーニング・紐づけ・レポート・
-  コンテンツ詳細・パラメータ。記事参照系(link-candidates/contents)は媒体側記事テーブル接続で有効化。
+  コンテンツ詳細・パラメータ。
+
+## 記事テーブル接続(S-03/S-03-1)
+
+コンテンツ紐づけ(F-05)は記事テーブルを参照する。本番は媒体側NewFan-Finance既存記事テーブルを
+**読み取り専用**で参照する(6.3.3節・admin-apiには読取権限のみ付与。11.4節)。
+
+dev環境には媒体テーブルが無いため、DataStackが検証用スタンドイン `rag_ads_contents_{env}`(dev/staging限定・
+prodでは作らない)を作成する。シードは `node infra/scripts/seed-contents.mjs dev`(レイヤーのnode_modulesがある
+`infra/lambda/layers/shared/nodejs/`から実行)。
+
+- **有効化される機能**: link-candidates(関連度順・上位10件)、S-03紐づけ(実行/解除・優先度・relevanceScore記録)、
+  S-03-1コンテンツ詳細(記事メタ・本文プレビュー・関連度・一致キーワード・競合広告数=GSI2逆引き)。
+- **仕様どおり省略**: 引用回数/日・質問タイプ内訳は媒体側の応答ログ未接続のため省略(6.3.3節「取得可能な範囲。
+  不可時はフィールド省略」)。媒体側応答ログ接続で有効化。
+- **prod移行**: prodではこのテーブルを作らず、媒体テーブル名/ARNをApiStackへ渡し、admin-apiの
+  `RAG_Ads_TABLE_CONTENTS` に設定する(属性名は既存スキーマへ読み替え。6.3.3節)。
 
 ## θ_rel 較正(重要)
 

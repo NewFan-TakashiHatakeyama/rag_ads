@@ -41,7 +41,7 @@ class ApiStack extends Stack {
   constructor(scope, id, props) {
     super(scope, id, props);
     const n = props.naming;
-    const { masterTable, placementsTable, dailyStatsTable } = props.dataStack;
+    const { masterTable, placementsTable, dailyStatsTable, contentsTable } = props.dataStack;
     const siteTopUrl = props.siteTopUrl;
 
     // ---- 共有Lambdaレイヤー(ragshared: Bedrock/S3 Vectors/DynamoDB接続の共通モジュール) ----
@@ -136,6 +136,11 @@ class ApiStack extends Stack {
     masterTable.grantReadWriteData(this.adminApiFn);
     placementsTable.grantReadData(this.adminApiFn);
     dailyStatsTable.grantReadData(this.adminApiFn);
+    // 記事テーブル(6.3.3節): 読み取りのみ付与(書込権限は付与しない。11.4節の最小権限)
+    if (contentsTable) {
+      contentsTable.grantReadData(this.adminApiFn);
+      this.adminApiFn.addEnvironment(n.envVars.TABLE_CONTENTS, contentsTable.tableName);
+    }
     this.adminApiFn.addToRolePolicy(new iam.PolicyStatement({
       sid: 'SsmParams',
       actions: ['ssm:GetParametersByPath', 'ssm:GetParameter', 'ssm:PutParameter'],

@@ -64,6 +64,19 @@ class DataStack extends Stack {
       removalPolicy: removal,
     });
 
+    // 記事テーブル(6.3.3節)。本番は媒体側NewFan-Finance既存記事テーブルを読み取り参照する。
+    // dev環境には媒体テーブルが無いため、S-03/S-03-1検証用のスタンドインを本スタックで作成する
+    // (prodデプロイ時はこのテーブルを作らず、媒体テーブルのARNをApiStackへ渡す想定)。
+    if (n.env !== 'prod') {
+      this.contentsTable = new dynamodb.Table(this, 'ContentsTable', {
+        tableName: `rag_ads_contents_${n.env}`,
+        partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+        sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+    }
+
     // ベクトル同期DLQ(9.2節: Put/Delete失敗の退避先)
     // 可視性タイムアウトは再処理Lambda(timeout 60s)以上が必須。AWS推奨のfunction timeout×6を採用
     this.vectorSyncDlq = new sqs.Queue(this, 'VectorSyncDlq', {
@@ -75,6 +88,7 @@ class DataStack extends Stack {
 
     new CfnOutput(this, 'MasterTableName', { value: this.masterTable.tableName });
     new CfnOutput(this, 'PlacementsTableName', { value: this.placementsTable.tableName });
+    if (this.contentsTable) new CfnOutput(this, 'ContentsTableName', { value: this.contentsTable.tableName });
     new CfnOutput(this, 'DailyStatsTableName', { value: this.dailyStatsTable.tableName });
     new CfnOutput(this, 'VectorSyncDlqUrl', { value: this.vectorSyncDlq.queueUrl });
   }

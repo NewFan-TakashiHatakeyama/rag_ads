@@ -5,7 +5,7 @@
  * エラー形式: {"error": {"code": "API-xxxx", "message": "…", "details": [...]}} (表9)
  */
 import {
-  getItem, putItem, deleteItem, query, scan, ConditionalCheckFailed,
+  getItem, putItem, deleteItem, query, scan, batchGet, ConditionalCheckFailed,
   getParams, invalidateParamsCache,
   embed, adEmbeddingText, contentEmbeddingText,
   putVector, deleteVector,
@@ -192,6 +192,23 @@ async function patchStatus(s, adId, body) {
   return ok(200, { adId, status: to });
 }
 
+/**
+ * 競合広告数(GSI2逆引き)。同一記事に紐づく他広告の件数とカテゴリ内訳のみ。
+ * 広告主名・広告タイトルは含めない(6.3.3節)。
+ */
+async function competingAdCount(contentId, excludeAdId) {
+  const links = await query(T_MASTER, `CONTENT#${contentId}`, { indexName: 'GSI2' });
+  const otherAdIds = [...new Set(links.map((l) => l.adId).filter((id) => id !== excludeAdId))];
+  if (otherAdIds.length === 0) return { count: 0, byCategory: {} };
+  const metas = await batchGet(T_MASTER, otherAdIds.map((id) => ({ PK: `AD#${id}`, SK: 'META' })));
+  const byCategory = {};
+  for (const m of metas) {
+    const cat = m.category ?? 'その他';
+    byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+  }
+  return { count: otherAdIds.length, byCategory };
+}
+
 // ---- コンテンツ紐づけ(F-05) ----
 async function linkCandidates(s, adId) {
   const ad = await getAdOr404(adId);
@@ -201,11 +218,17 @@ async function linkCandidates(s, adId) {
   const linked = new Set((await linksOf(adId)).map((l) => l.SK.slice('LINK#'.length)));
   const contents = (await scan(T_CONTENTS, { filterExpression: 'SK = :m', values: { ':m': 'META' } }))
     .filter((c) => !linked.has(c.contentId));
+  // 関連度で上位10件へ絞ってから競合数を付与(全記事の集計を避ける)
   const scored = await Promise.all(contents.map(async (c) => ({
     c, relevance: round4(cosine(adVec, await embed(contentEmbeddingText(c)))),
   })));
-  const candidates = scored.sort((a, b) => b.relevance - a.relevance).slice(0, 10)
-    .map(({ c, relevance }) => ({ contentId: c.contentId, title: c.title, genre: c.genre, relevance, citationsPerDay: 0, competingAds: 0 }));
+  const top = scored.sort((a, b) => b.relevance - a.relevance).slice(0, 10);
+  const candidates = await Promise.all(top.map(async ({ c, relevance }) => ({
+    contentId: c.contentId, title: c.title, genre: c.genre, relevance,
+    // 引用回数/日は媒体側応答ログ未接続のため0(接続後に有効化。6.3.3節)
+    citationsPerDay: 0,
+    competingAds: (await competingAdCount(c.contentId, adId)).count,
+  })));
   return ok(200, { adId, candidates });
 }
 
@@ -216,9 +239,15 @@ async function putLink(s, adId, contentId, body) {
   if (T_CONTENTS && !(await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' }))) throw new ApiError(404, 'API-4041', 'リソースが存在しません');
   const priority = body?.priority ?? '中';
   if (!PRIORITIES.includes(priority)) throw new ApiError(400, 'API-4001', 'バリデーションエラー', [{ field: 'priority', reason: '優先度：高・中・低のいずれかを指定してください' }]);
+  // 紐づけ時点の関連度を記録(S-03の紐づけ済み表示・分析用)
+  let relevanceScore = null;
+  if (T_CONTENTS) {
+    const c = await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' });
+    if (c) relevanceScore = round4(cosine(await embed(adEmbeddingText(ad)), await embed(contentEmbeddingText(c))));
+  }
   await putItem(T_MASTER, {
     PK: `AD#${adId}`, SK: `LINK#${contentId}`, GSI2PK: `CONTENT#${contentId}`, GSI2SK: `AD#${adId}`,
-    adId, contentId, priority, relevanceScore: null, createdAt: nowIso(),
+    adId, contentId, priority, relevanceScore, createdAt: nowIso(),
   });
   log('INFO', 'admin_api', 'link_created', { adIds: [adId], msg: contentId });
   return ok(200, { adId, contentId, priority });
@@ -268,12 +297,17 @@ async function getContent(s, contentId, params) {
     sources: c.sources ?? [], bodyPreview: full ? body : body.slice(0, 2000), hasMore: !full && body.length > 2000,
   };
   const adId = params.get('adId');
+  // 競合状況(GSI2逆引き)。統計(引用回数/日・質問タイプ内訳)は媒体側応答ログ未接続のため省略(6.3.3節)
+  res.competingAds = await competingAdCount(contentId, adId ?? null);
   if (adId) {
     const ad = await getItem(T_MASTER, { PK: `AD#${adId}`, SK: 'META' });
     if (ad) {
       requireOwnership(s, ad);
       res.relevance = round4(cosine(await embed(adEmbeddingText(ad)), await embed(contentEmbeddingText(c))));
       res.matchedKeywords = [...(ad.keywords ?? []), ...(ad.tags ?? [])].filter((kw) => kw && (c.title.includes(kw) || body.includes(kw)));
+      const link = await getItem(T_MASTER, { PK: `AD#${adId}`, SK: `LINK#${contentId}` });
+      res.linked = !!link;
+      res.linkedPriority = link?.priority ?? null;
     }
   }
   return ok(200, res);

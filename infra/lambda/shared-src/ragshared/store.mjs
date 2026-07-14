@@ -43,13 +43,13 @@ export async function deleteItem(table, key) {
   await ddb.send(new DeleteCommand({ TableName: table, Key: key }));
 }
 
-/** PK=pk (SK昇順)。skPrefix指定でbegins_with(SK)。indexName指定でGSI1。全ページ取得 */
+/** PK=pk (SK昇順)。skPrefix指定でbegins_with(SK)。indexName='GSI1'|'GSI2'でGSI検索。全ページ取得 */
 export async function query(table, pk, { skPrefix = null, indexName = null, skBetween = null } = {}) {
   const items = [];
   let key;
   const values = { ':pk': pk };
-  const pkAttr = indexName ? 'GSI1PK' : 'PK';
-  const skAttr = indexName ? 'GSI1SK' : 'SK';
+  const pkAttr = indexName ? `${indexName}PK` : 'PK';
+  const skAttr = indexName ? `${indexName}SK` : 'SK';
   let cond = `${pkAttr} = :pk`;
   if (skPrefix) { cond += ` AND begins_with(${skAttr}, :skp)`; values[':skp'] = skPrefix; }
   if (skBetween) { cond += ` AND ${skAttr} BETWEEN :s AND :e`; values[':s'] = skBetween[0]; values[':e'] = skBetween[1]; }

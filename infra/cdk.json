@@ -4,6 +4,7 @@
     "env": "dev",
     "siteTopUrl": "https://finance.newfan.co.jp/",
     "vectorBucketName": "rag-ads-vectors-dev",
+    "embedModelId": "amazon.titan-embed-text-v2:0",
     "corsOrigins": ["*"],
     "@aws-cdk/core:checkSecretUsage": true,
     "aws-cdk:enableDiffNoFail": true

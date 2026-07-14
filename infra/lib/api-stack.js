@@ -22,13 +22,16 @@ const DEFAULT_PARAMS = {
   'weights.rel': '0.6',
   'weights.bid': '0.2',
   'weights.link': '0.2',
-  'theta_rel': '0.50',
+  // θ_rel: Titan Embed v2の実測に基づく初期値(2026-07-14 dev検証)。
+  // ローカルモック(bigram)では0.50だが、実埋め込みでは関連広告が0.32〜0.42・無関連が0.12未満に
+  // 分布するため0.25を初期値とする。検証運用で継続チューニング(BD-001 11.2)。
+  'theta_rel': '0.25',
   'max_slots': '3',
   'candidate_topk': '10',
   'max_per_advertiser': '1',
   'lead.min_chars': '20',
   'lead.max_chars': '60',
-  'lead.model_id': 'anthropic.claude-haiku-4-5-20251001-v1:0',
+  'lead.model_id': 'jp.anthropic.claude-haiku-4-5-20251001-v1:0',
   'lead.enabled': 'true',
   'lead.fallback_text': 'ご質問に関連するサービスのご案内です。',
   'sampling.content_check': '0.10',
@@ -40,6 +43,15 @@ class ApiStack extends Stack {
     const n = props.naming;
     const { masterTable, placementsTable, dailyStatsTable } = props.dataStack;
     const siteTopUrl = props.siteTopUrl;
+
+    // ---- 共有Lambdaレイヤー(ragshared: Bedrock/S3 Vectors/DynamoDB接続の共通モジュール) ----
+    this.sharedLayer = new lambda.LayerVersion(this, 'SharedLayer', {
+      layerVersionName: `rag-ads_shared-${n.env}`,
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'layers', 'shared')),
+      compatibleRuntimes: [lambda.Runtime.NODEJS_22_X],
+      compatibleArchitectures: [lambda.Architecture.ARM_64],
+      description: 'RAG-Ads 共有モジュール(埋め込み・ベクトル検索・LLM・検証)',
+    });
 
     // ---- Cognito(11.1節: ユーザープール1面+advertiser/adminグループ) ----
     this.userPool = new cognito.UserPool(this, 'UserPool', {
@@ -82,6 +94,7 @@ class ApiStack extends Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', entryDir)),
+      layers: [this.sharedLayer],
       memorySize: 256,
       timeout: Duration.seconds(10),
       logGroup: new logs.LogGroup(this, `${fnKey}Logs`, {
@@ -95,6 +108,10 @@ class ApiStack extends Stack {
         [n.envVars.SSM_PREFIX]: n.ssmPrefix,
         [n.envVars.SITE_TOP_URL]: siteTopUrl,
         [n.envVars.METRICS_NAMESPACE]: n.metricsNamespace,
+        [n.envVars.VECTOR_BUCKET]: props.vectorBucketName,
+        [n.envVars.VECTOR_INDEX]: n.s3.vectorIndex,
+        RAG_Ads_EMBED_MODEL_ID: props.embedModelId ?? 'amazon.titan-embed-text-v2:0',
+        RAG_Ads_ENV: n.env,
         ...extraEnv,
       },
     });
@@ -110,12 +127,9 @@ class ApiStack extends Stack {
     placementsTable.grantReadWriteData(this.clickFn);
     dailyStatsTable.grantWriteData(this.clickFn);
 
-    // 広告管理API(6.3節。ビジネスロジックはPhase 1.5でローカル実装から移植)
+    // 広告管理API(6.3節)。広告CRUD・審査・紐づけ・レポート+ベクトル同期・スクリーニング
     this.adminApiFn = new lambda.Function(this, 'AdminApiFn', {
-      ...lambdaDefaults('adminApi', 'admin-api', {
-        [n.envVars.VECTOR_BUCKET]: props.vectorBucketName,
-        [n.envVars.VECTOR_INDEX]: n.s3.vectorIndex,
-      }),
+      ...lambdaDefaults('adminApi', 'admin-api'),
       timeout: Duration.seconds(29),
       memorySize: 512,
     });

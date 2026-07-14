@@ -1,0 +1,8 @@
+{
+  "name": "ragshared",
+  "version": "1.0.0",
+  "description": "RAG-Ads Lambda共有モジュール(Bedrock/S3 Vectors/DynamoDB接続)",
+  "type": "module",
+  "main": "index.mjs",
+  "private": true
+}

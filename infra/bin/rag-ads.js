@@ -20,6 +20,7 @@ const n = naming(env);
 const siteTopUrl = app.node.tryGetContext('siteTopUrl') ?? 'https://finance.newfan.co.jp/';
 const vectorBucketName = app.node.tryGetContext('vectorBucketName') ?? `rag-ads-vectors-${env}`;
 const corsOrigins = app.node.tryGetContext('corsOrigins') ?? ['*'];
+const embedModelId = app.node.tryGetContext('embedModelId') ?? 'amazon.titan-embed-text-v2:0';
 
 const awsEnv = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -28,7 +29,7 @@ const awsEnv = {
 
 const dataStack = new DataStack(app, n.stack('Data'), { env: awsEnv, naming: n });
 const apiStack = new ApiStack(app, n.stack('Api'), {
-  env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins,
+  env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins, embedModelId,
 });
 apiStack.addDependency(dataStack);
 const batchStack = new BatchStack(app, n.stack('Batch'), {

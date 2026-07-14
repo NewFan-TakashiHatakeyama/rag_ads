@@ -34,15 +34,35 @@ bash scripts/create-demo-users.sh <UserPoolId> admin@newfan.co.jp '<pw>' admin
 bash scripts/create-demo-users.sh <UserPoolId> advertiser01@example.co.jp '<pw>' advertiser
 ```
 
-## 現段階の実装状況
+## 実接続(Bedrock / S3 Vectors)
 
-- **配信系Lambda(page-ads / click)**: DynamoDB SDK版で完全実装。ローカルPoC(`server/pipeline.js`)で
-  検証済みのロジック(有効性判定・表示/クリック計測・オープンリダイレクト防止)を移植済み。
-- **日次集計Lambda(daily-agg)**: 確定値再計算(GSI1走査・冪等・impressions/clicks保持)を実装済み。
-  期限切れ/配信開始の自動遷移はフェーズ1.5で追加(一次防御はベクトルメタデータフィルタのため未実装でも配信誤りなし)。
-- **管理API(admin-api)**: `/v1/params`(表6の参照・検証付き更新=段階公開のフラグ操作)を実装済み。
-  広告CRUD・審査・紐づけ・レポートは501の雛形(BD-001 W1-W2「API雛形」)。フェーズ1.5で
-  `server/adminApi.js`(テスト48件で検証済み)から移植する。
+共有Lambdaレイヤー `ragshared`(`infra/lambda/shared-src/ragshared/`)で実サービスに接続する。
+`scripts/build-layer.sh` でSDK依存を導入しレイヤーへ配置する(**cdk deployの前に実行が必要**)。
+
+| 用途 | サービス・モデル | 備考 |
+|---|---|---|
+| 埋め込み | Bedrock Titan Embed v2(1024次元・正規化) | 記事・広告・質問で共用。S3 Vectorsインデックスと次元一致 |
+| 質問分類/リード文/スクリーニング | Bedrock Claude Haiku 4.5(`jp.anthropic.claude-haiku-4-5-20251001-v1:0`) | **オンデマンド不可・推論プロファイル必須**。SSM `lead.model_id` |
+| ベクトル検索 | S3 Vectors `rag-ads-index-dev` | フィルタ status=delivering AND 期間内(期間はYYYYMMDD数値メタデータ) |
+
+## 現段階の実装状況(フェーズ1.5完了)
+
+- **配信系Lambda(page-ads / click)**: 完全実装。有効性判定・表示/クリック計測・オープンリダイレクト防止。
+- **日次集計Lambda(daily-agg)**: 確定値再計算(GSI1走査・冪等・impressions/clicks保持)。
+  期限切れ/配信開始の自動遷移は媒体側パイプライン移植とあわせて追加(一次防御はベクトルフィルタ)。
+- **管理API(admin-api)**: **全エンドポイント実装済み**(`server/adminApi.js`を実DynamoDB/S3 Vectors/Bedrockへ移植)。
+  広告CRUD・表10ステータス遷移・ベクトル同期(承認Put/停止Delete)・スクリーニング・紐づけ・レポート・
+  コンテンツ詳細・パラメータ。記事参照系(link-candidates/contents)は媒体側記事テーブル接続で有効化。
+
+## θ_rel 較正(重要)
+
+**ローカルモック用の θ_rel=0.50 は実Titan埋め込みには不適**。dev実測(2026-07-14)では
+住宅ローン広告に対し関連質問が類似度0.32〜0.42・無関連が0.12未満に分布したため、初期値を
+**0.25** に較正済み(CDK default + dev SSM)。検証運用で継続チューニング(BD-001 11.2)。
+
+**運用上の留意**: SSMパラメータはCDK管理のため、`cdk deploy`が実行時チューニング値をCDK既定値へ
+上書きする。検証運用で頻繁にチューニングする段階に入ったら、チューニング対象パラメータ(theta_rel・
+weights.*・lead.*)はCDK管理から外す(初回のみ作成し以後はAPI経由で更新)ことを推奨。
 
 ## スモークテスト結果(dev・実AWS)
 

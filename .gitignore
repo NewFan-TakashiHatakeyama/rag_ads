@@ -7,3 +7,5 @@ infra/cdk.out/
 infra/deploy*.log
 infra/agg_out.json
 infra/cdk.context.json
+infra/lambda/layers/shared/nodejs/node_modules/
+infra/lambda/layers/shared/nodejs/package-lock.json

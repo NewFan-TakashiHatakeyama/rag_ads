@@ -182,6 +182,40 @@ async function updateAd(s, adId, body) {
   return ok(200, { adId, status: next.status, findings });
 }
 
+/**
+ * 広告の物理削除(F-01)
+ *
+ * 一度も配信されていない状態(draft / needs_fix)のみ許可する。
+ * 配信済み(delivering/paused/expired)は Placement(課金記録・監査証跡)が存在し得るため、
+ * 物理削除せず停止(paused)による論理削除を用いる(DD-001 6.4節)。
+ * reviewing は審査対象の固定のため削除させない(編集不可と同じ理由)。
+ *
+ * draft/needs_fix は承認前でありベクトル未登録のため、S3 Vectors の削除は不要。
+ * 紐づけ(LINK#)も含めて AD#{adId} 配下をすべて削除する。
+ */
+const DELETABLE_STATUSES = ['draft', 'needs_fix'];
+
+async function deleteAd(s, adId) {
+  const ad = await getAdOr404(adId);
+  requireOwnership(s, ad);
+  if (!DELETABLE_STATUSES.includes(ad.status)) {
+    throw new ApiError(
+      409,
+      'API-4091',
+      ad.status === 'reviewing'
+        ? '審査中の広告は削除できません(審査対象の固定のため)'
+        : '配信実績のある広告は削除できません(課金記録の保全のため)。「停止」をご利用ください'
+    );
+  }
+  // 紐づけ(LINK#{contentId})も残さず削除する
+  for (const l of await linksOf(adId)) {
+    await deleteItem(T_MASTER, { PK: `AD#${adId}`, SK: l.SK });
+  }
+  await deleteItem(T_MASTER, { PK: `AD#${adId}`, SK: 'META' });
+  log('INFO', 'admin_api', 'ad_deleted', { adIds: [adId] });
+  return ok(200, { adId, deleted: true });
+}
+
 // ---- ステータス遷移(6.3.2 表10) ----
 const TRANSITIONS = [
   { from: 'reviewing', to: 'delivering', roles: ['admin'] },
@@ -512,6 +546,7 @@ export const handler = async (event) => {
     if (pp.adId && /\/v1\/ads\/[^/]+$/.test(rawPath)) {
       if (method === 'GET') return await getAd(s, pp.adId);
       if (method === 'PUT') return await updateAd(s, pp.adId, body);
+      if (method === 'DELETE') return await deleteAd(s, pp.adId);
     }
     if (pp.adId && rawPath.endsWith('/status') && method === 'PATCH') return await patchStatus(s, pp.adId, body);
     if (pp.adId && rawPath.endsWith('/link-candidates') && method === 'GET') return await linkCandidates(s, pp.adId);

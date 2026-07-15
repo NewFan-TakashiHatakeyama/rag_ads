@@ -36,7 +36,9 @@ a { color: var(--rag-teal); }
 .side-nav { width: 176px; background: #F4F6FA; border-right: 1px solid var(--rag-line); padding: 14px 0; flex: none; }
 .side-nav a { display: block; padding: 9px 18px; color: var(--rag-sub); text-decoration: none; font-size: 13px; border-left: 3px solid transparent; }
 .side-nav a.on { color: var(--rag-teal); border-left-color: var(--rag-teal); background: var(--rag-teal-l); font-weight: 700; }
-.main { flex: 1; padding: 22px 28px 60px; min-width: 0; max-width: 1100px; }
+/* 主要コンテンツ: ワイド画面でテーブルを広く使い、超ワイドでは左寄せにならず中央に整える
+   (flexの既定はflex-startのため、max-widthだけだと右に余白が偏る) */
+.main { flex: 1; padding: 22px 28px 60px; min-width: 0; max-width: 1440px; margin-left: auto; margin-right: auto; width: 100%; }
 .page-title { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .page-title h1 { font-size: 18px; color: var(--rag-navy); font-weight: 800; }
 .page-title .sub { color: var(--rag-sub); font-size: 12.5px; }

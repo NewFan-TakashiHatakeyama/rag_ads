@@ -643,9 +643,11 @@ async function viewAdForm(adId) {
     }
 
     document.getElementById('main').innerHTML = `
-      <div class="page-title"><h1>${adId ? '広告の編集' : '新規出稿'}</h1>${origStatus ? badge(origStatus) : ''}</div>
-      ${persistentNotes}
-      <div style="max-width:680px">${stepHead}${body}</div>`;
+      <div class="form-col">
+        <div class="page-title"><h1>${adId ? '広告の編集' : '新規出稿'}</h1>${origStatus ? badge(origStatus) : ''}</div>
+        ${persistentNotes}
+        ${stepHead}${body}
+      </div>`;
     bind();
   };
 

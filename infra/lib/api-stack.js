@@ -268,7 +268,7 @@ class ApiStack extends Stack {
     const M = apigwv2.HttpMethod;
     const adminRoutes = [
       ['/v1/ads', [M.GET, M.POST]],
-      ['/v1/ads/{adId}', [M.GET, M.PUT]],
+      ['/v1/ads/{adId}', [M.GET, M.PUT, M.DELETE]],
       ['/v1/ads/{adId}/status', [M.PATCH]],
       ['/v1/ads/{adId}/link-candidates', [M.GET]],
       ['/v1/ads/{adId}/links/{contentId}', [M.PUT, M.DELETE]],

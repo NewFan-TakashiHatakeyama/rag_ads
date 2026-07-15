@@ -52,6 +52,11 @@ class ApiStack extends Stack {
     const n = props.naming;
     const { masterTable, placementsTable, dailyStatsTable, contentsTable } = props.dataStack;
     const siteTopUrl = props.siteTopUrl;
+    // 広告システム自身のベクトル索引ARN。書込系はここに限定し、媒体の索引へは書けないようにする(11.4節の最小権限)
+    const adVectorArns = [
+      `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.vectorBucketName}`,
+      `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.vectorBucketName}/index/${props.naming.s3.vectorIndex}`,
+    ];
 
     // ---- 共有Lambdaレイヤー(ragshared: Bedrock/S3 Vectors/DynamoDB接続の共通モジュール) ----
     this.sharedLayer = new lambda.LayerVersion(this, 'SharedLayer', {
@@ -170,8 +175,10 @@ class ApiStack extends Stack {
       sid: 'BedrockInvoke', actions: ['bedrock:InvokeModel'], resources: ['*'], // 埋め込み+リード文生成
     }));
     this.generateAdsFn.addToRolePolicy(new iam.PolicyStatement({
-      // 候補検索(QueryVectorsはGetVectorsも要求する)
-      sid: 'VectorQuery', actions: ['s3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex'], resources: ['*'],
+      // 候補検索(QueryVectorsはGetVectorsも要求する)。広告索引の読取のみ
+      sid: 'VectorQuery',
+      actions: ['s3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex'],
+      resources: adVectorArns,
     }));
 
     // 広告管理API(6.3節)。広告CRUD・審査・紐づけ・レポート+ベクトル同期・スクリーニング
@@ -199,18 +206,28 @@ class ApiStack extends Stack {
       resources: ['*'],
     }));
     this.adminApiFn.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'VectorIndexSync', // 承認時Put/停止時Delete(5.4節)+ 紐づけ候補のANN検索(6.3.2)
+      sid: 'AdVectorIndexSync', // 承認時Put/停止時Delete(5.4節)。書込は広告システム自身の索引のみ
       actions: [
         's3vectors:PutVectors', 's3vectors:DeleteVectors',
         's3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex',
       ],
-      resources: ['*'],
+      resources: adVectorArns,
     }));
     // 媒体の記事ベクトル索引(6.3.2): 広告ベクトルでANN検索して紐づけ候補を出す。
     // 記事は媒体側で埋め込み済み(決定A-1で同一Gemini空間)のため、記事件数に依存せず候補を取得できる。
+    // 【重要】媒体の記事・ベクトルは実サービスのデータ。広告システムからは読取専用とし、
+    //        書込系(PutVectors/DeleteVectors)はIAMで付与しない(誤操作を権限で防ぐ)。
     if (props.contentVectorBucket && props.contentVectorIndex) {
       this.adminApiFn.addEnvironment('RAG_Ads_CONTENT_VECTOR_BUCKET', props.contentVectorBucket);
       this.adminApiFn.addEnvironment('RAG_Ads_CONTENT_VECTOR_INDEX', props.contentVectorIndex);
+      this.adminApiFn.addToRolePolicy(new iam.PolicyStatement({
+        sid: 'MediaVectorReadOnly',
+        actions: ['s3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex'],
+        resources: [
+          `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.contentVectorBucket}`,
+          `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.contentVectorBucket}/index/${props.contentVectorIndex}`,
+        ],
+      }));
     }
     // 媒体の記事テーブル(6.3.3): コンテンツ詳細の本文取得。読み取りのみ(11.4節の最小権限)
     if (props.mediaContentTable) {

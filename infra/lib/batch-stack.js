@@ -78,7 +78,13 @@ class BatchStack extends Stack {
     this.alertsTopic.grantPublish(this.dailyAggFn);
     // 状態自動遷移のベクトル同期(9.2節): 配信開始でPut(要Bedrock埋め込み)、期限切れでDelete
     this.dailyAggFn.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'VectorSync', actions: ['s3vectors:PutVectors', 's3vectors:DeleteVectors', 's3vectors:GetIndex'], resources: ['*'],
+      // 書込は広告システム自身の索引のみ。媒体の記事索引(実サービスのデータ)へは権限を与えない
+      sid: 'VectorSync',
+      actions: ['s3vectors:PutVectors', 's3vectors:DeleteVectors', 's3vectors:GetIndex'],
+      resources: [
+        `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.vectorBucketName}`,
+        `arn:aws:s3vectors:${this.region}:${this.account}:bucket/${props.vectorBucketName}/index/${props.naming.s3.vectorIndex}`,
+      ],
     }));
     this.dailyAggFn.addToRolePolicy(new iam.PolicyStatement({
       sid: 'BedrockEmbed', actions: ['bedrock:InvokeModel'], resources: ['*'],

@@ -240,6 +240,24 @@ async function competingAdCount(contentId, excludeAdId) {
 
 // ---- コンテンツ紐づけ(F-05) ----
 const LINK_CANDIDATE_LIMIT = 20;
+// 媒体のベクトル索引には、記事テーブルのTTL削除後もベクトルが残る(索引と実データが乖離する)。
+// 索引の上位をそのまま出すと存在しない記事が並び、詳細404・紐づけ不可になるため、
+// 多めに取得して実在分だけに絞る。倍率は「索引に対する実在記事の割合」の悪化に耐える値。
+const ANN_OVERFETCH = 10;
+const BATCH_GET_LIMIT = 100;
+
+/** 候補のうち記事テーブルに実在するものだけを残す(削除済み=幽霊エントリを除外) */
+async function filterLiveContents(hits) {
+  if (!T_MEDIA_CONTENTS) return hits; // スタンドイン運用時は候補の出所が記事テーブル自身のため素通し
+  const live = [];
+  for (let i = 0; i < hits.length; i += BATCH_GET_LIMIT) {
+    const chunk = hits.slice(i, i + BATCH_GET_LIMIT);
+    const found = await batchGet(T_MEDIA_CONTENTS, chunk.map((h) => ({ url_hash: h.contentId })));
+    const alive = new Set(found.map((m) => m.url_hash));
+    for (const h of chunk) if (alive.has(h.contentId)) live.push(h);
+  }
+  return live;
+}
 
 /**
  * 紐づけ候補(S-03・6.3.2)。
@@ -254,10 +272,11 @@ async function linkCandidates(s, adId) {
   const adVec = await embed(adEmbeddingText(ad));
   const linked = new Set((await linksOf(adId)).map((l) => l.SK.slice('LINK#'.length)));
 
-  // 紐づけ済みが上位を占めても候補が枯れないよう多めに取得してから除外する
-  const hits = await queryContentCandidates(adVec, LINK_CANDIDATE_LIMIT + linked.size);
+  // 紐づけ済み・削除済み記事を除いても候補が枯れないよう多めに取得してから絞る
+  const hits = await queryContentCandidates(adVec, LINK_CANDIDATE_LIMIT * ANN_OVERFETCH + linked.size);
   if (hits) {
-    const top = hits.filter((h) => !linked.has(h.contentId)).slice(0, LINK_CANDIDATE_LIMIT);
+    const live = await filterLiveContents(hits);
+    const top = live.filter((h) => !linked.has(h.contentId)).slice(0, LINK_CANDIDATE_LIMIT);
     const candidates = await Promise.all(top.map(async (h) => ({
       contentId: h.contentId, title: h.title, genre: h.genre, url: h.url,
       relevance: round4(h.relevance),
@@ -299,14 +318,17 @@ async function putLink(s, adId, contentId, body) {
   const ad = await getAdOr404(adId);
   requireOwnership(s, ad);
   if (ad.status === 'draft' || ad.status === 'reviewing') throw new ApiError(409, 'API-4091', '下書き・審査中の広告は紐づけできません(承認後に有効化されます)');
-  if (T_CONTENTS && !(await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' }))) throw new ApiError(404, 'API-4041', 'リソースが存在しません');
+  // 実在確認は記事の正(媒体テーブル or スタンドイン)に対して行う。
+  // ベクトル索引は媒体のTTL削除済み記事を含みうるため、索引だけを根拠に紐づけてはならない。
+  const c = await fetchContent(contentId);
+  if ((T_MEDIA_CONTENTS || T_CONTENTS) && !c) throw new ApiError(404, 'API-4041', 'リソースが存在しません(記事が削除済みの可能性があります)');
   const priority = body?.priority ?? '中';
   if (!PRIORITIES.includes(priority)) throw new ApiError(400, 'API-4001', 'バリデーションエラー', [{ field: 'priority', reason: '優先度：高・中・低のいずれかを指定してください' }]);
-  // 紐づけ時点の関連度を記録(S-03の紐づけ済み表示・分析用)
+  // 紐づけ時点の関連度を記録(S-03の紐づけ済み表示・分析用)。一覧(ANN)と同じ媒体の保存済みベクトルを優先
   let relevanceScore = null;
-  if (T_CONTENTS) {
-    const c = await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' });
-    if (c) relevanceScore = round4(cosine(await embed(adEmbeddingText(ad)), await embed(contentEmbeddingText(c))));
+  if (c) {
+    const contentVec = await getContentVector(contentId) ?? await embed(contentEmbeddingText(c));
+    relevanceScore = round4(cosine(await embed(adEmbeddingText(ad)), contentVec));
   }
   await putItem(T_MASTER, {
     PK: `AD#${adId}`, SK: `LINK#${contentId}`, GSI2PK: `CONTENT#${contentId}`, GSI2SK: `AD#${adId}`,

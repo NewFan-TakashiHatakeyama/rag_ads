@@ -190,10 +190,28 @@ class ApiStack extends Stack {
       resources: ['*'],
     }));
     this.adminApiFn.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'VectorIndexSync', // 承認時Put/停止時Delete(5.4節)
-      actions: ['s3vectors:PutVectors', 's3vectors:DeleteVectors', 's3vectors:QueryVectors', 's3vectors:GetIndex'],
+      sid: 'VectorIndexSync', // 承認時Put/停止時Delete(5.4節)+ 紐づけ候補のANN検索(6.3.2)
+      actions: [
+        's3vectors:PutVectors', 's3vectors:DeleteVectors',
+        's3vectors:QueryVectors', 's3vectors:GetVectors', 's3vectors:GetIndex',
+      ],
       resources: ['*'],
     }));
+    // 媒体の記事ベクトル索引(6.3.2): 広告ベクトルでANN検索して紐づけ候補を出す。
+    // 記事は媒体側で埋め込み済み(決定A-1で同一Gemini空間)のため、記事件数に依存せず候補を取得できる。
+    if (props.contentVectorBucket && props.contentVectorIndex) {
+      this.adminApiFn.addEnvironment('RAG_Ads_CONTENT_VECTOR_BUCKET', props.contentVectorBucket);
+      this.adminApiFn.addEnvironment('RAG_Ads_CONTENT_VECTOR_INDEX', props.contentVectorIndex);
+    }
+    // 媒体の記事テーブル(6.3.3): コンテンツ詳細の本文取得。読み取りのみ(11.4節の最小権限)
+    if (props.mediaContentTable) {
+      this.adminApiFn.addEnvironment('RAG_Ads_MEDIA_CONTENT_TABLE', props.mediaContentTable);
+      this.adminApiFn.addToRolePolicy(new iam.PolicyStatement({
+        sid: 'MediaContentRead',
+        actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem'],
+        resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/${props.mediaContentTable}`],
+      }));
+    }
 
     // ---- HTTP API(6.1節: 管理系=Cognito JWT、配信系=公開) ----
     this.httpApi = new apigwv2.HttpApi(this, 'HttpApi', {

@@ -43,7 +43,18 @@ bash scripts/create-demo-users.sh <UserPoolId> advertiser01@example.co.jp '<pw>'
 |---|---|---|
 | 埋め込み | プラグイン式: Bedrock Titan Embed v2(1024) / **Gemini gemini-embedding-001(3072)** | 記事・広告・質問で共用。S3 Vectorsインデックスと次元一致必須。**現dev は決定A-1で Gemini/3072**(`-c embedProvider=gemini`) |
 | 質問分類/リード文/スクリーニング | Bedrock Claude Haiku 4.5(`jp.anthropic.claude-haiku-4-5-20251001-v1:0`) | **オンデマンド不可・推論プロファイル必須**。SSM `lead.model_id` |
-| ベクトル検索 | S3 Vectors `rag-ads-index-dev` | フィルタ status=delivering AND 期間内(期間はYYYYMMDD数値メタデータ) |
+| ベクトル検索(配信) | S3 Vectors `rag-ads-index-dev`(広告ベクトル) | 質問ベクトルで検索。フィルタ status=delivering AND 期間内(期間はYYYYMMDD数値メタデータ) |
+| ベクトル検索(紐づけ候補) | S3 Vectors **媒体の記事索引**(`newfan-finance-vectors` / `prna-articles`・3072/cosine) | **広告ベクトルでANN検索**(6.3.2)。記事は媒体側で埋め込み済み(決定A-1で同一Gemini空間)のため記事件数に依存しない。返る contentId は媒体の `article_id` = generate-adsが受け取る `articleContentIds` と同一体系なので**紐づけ加点が実トラフィックで一致する** |
+| 記事本文(コンテンツ詳細) | 媒体の DynamoDB `prna-articles`(PK=`url_hash`・962件) | 属性を読み替え(`title/content/category/pubDate/url`)。読み取りのみ |
+
+**紐づけ関連のコンテキスト**(未指定時はスタンドイン記事テーブルによる従来動作へ縮退):
+```
+npx cdk deploy RAG-Ads-Api-Stack-dev --exclusively -c env=dev -c embedProvider=gemini \
+  -c contentVectorBucket=newfan-finance-vectors \
+  -c contentVectorIndex=prna-articles \
+  -c mediaContentTable=prna-articles \
+  -c serviceApiKey=<現行キー>
+```
 
 ## 現段階の実装状況(フェーズ1.5完了)
 

@@ -73,6 +73,28 @@ async function reserveBudget(ad, today) {
   }
 }
 
+/**
+ * 記事の引用回数を日次計上(6.3.3「引用回数/日」用)。
+ * 媒体が回答生成時に渡す articleContentIds(= 媒体の article_id)を、
+ * daily_stats の PK=CONTENT#{id} / SK=DATE#{JST日付} へ加算する。
+ * 広告の有無に依存しない記事側の指標のため、パイプラインの成否と切り離して計上する。
+ */
+async function recordContentCitations(articleContentIds, today, pageId) {
+  const now = nowIso();
+  for (const contentId of [...new Set(articleContentIds)].slice(0, 20)) {
+    if (typeof contentId !== 'string' || !contentId) continue;
+    try {
+      await updateItem(T_STATS, { PK: `CONTENT#${contentId}`, SK: `DATE#${today}` }, {
+        add: { citations: 1 },
+        set: { updatedAt: now, contentId, date: today },
+      });
+    } catch (e) {
+      // 記事指標の失敗は広告生成を妨げない
+      log('WARN', 'ad_pipeline', 'content_citation_failed', { pageId, msg: e.message });
+    }
+  }
+}
+
 /** 補償減算(G-9失敗時。3.5節) */
 async function compensate(reserved, today) {
   for (const r of reserved) {
@@ -201,6 +223,10 @@ export const handler = async (event) => {
     }
 
     const today = jstDate();
+    // 記事の引用回数を日次計上(S-03「引用回数/日」用)。広告が付くかに関わらず、回答に引用された事実を記録する。
+    // 冪等性チェック通過後(=新規pageId)に行うため、同一回答での二重計上はしない。計測失敗は生成を妨げない。
+    await recordContentCitations(articleContentIds, today, pageId);
+
     // G-2 質問分析。埋め込みは questionVector 優先(媒体Gemini共用)、無ければ自前埋め込み
     const { classifyQuestion } = await import('ragshared');
     const cls = await classifyQuestion(params['lead.model_id'], question);

@@ -8,7 +8,7 @@ import {
   getItem, putItem, deleteItem, query, scan, batchGet, ConditionalCheckFailed,
   getParams, invalidateParamsCache,
   embed, adEmbeddingText, contentEmbeddingText,
-  putVector, deleteVector,
+  putVector, deleteVector, queryContentCandidates, getContentVector,
   screenAd, validateAd, pickAdAttributes,
   ulid, nowIso, jstDate, jstDateOffset, round4, log,
 } from 'ragshared';
@@ -20,9 +20,38 @@ const SSM_PREFIX = process.env.RAG_Ads_SSM_PREFIX;
 const ssm = new SSMClient({});
 const PRIORITIES = ['高', '中', '低'];
 
-// contentテーブル(既存記事)はローカルではDynamoDBだが本番は既存記事テーブル。
+// contentテーブル(既存記事)はローカル/devではスタンドイン、本番は媒体の既存記事テーブルを直接参照する。
 // 環境変数 RAG_Ads_TABLE_CONTENTS が無ければ記事参照系(紐づけ候補・コンテンツ詳細)は縮退。
 const T_CONTENTS = process.env.RAG_Ads_TABLE_CONTENTS || null;
+// 媒体の記事テーブル(PK=url_hash=article_id)。設定時はこちらを正とし、属性名を読み替える(6.3.3節)。
+const T_MEDIA_CONTENTS = process.env.RAG_Ads_MEDIA_CONTENT_TABLE || null;
+
+/**
+ * 記事1件の取得。媒体テーブル(url_hash / title / content / category / pubDate / url)が設定されていれば
+ * それを正とし、広告システムの内部表現へ読み替える。未設定時はスタンドイン記事テーブルを使う。
+ */
+async function fetchContent(contentId) {
+  if (T_MEDIA_CONTENTS) {
+    const m = await getItem(T_MEDIA_CONTENTS, { url_hash: contentId });
+    if (!m) return null;
+    return {
+      contentId: m.url_hash,
+      title: m.title ?? '',
+      genre: m.category ?? '',
+      body: m.content ?? '',
+      publishedAt: m.pubDate ?? null,
+      updatedAt: m.pubDate ?? null,
+      sources: m.url ? [m.url] : [],
+    };
+  }
+  if (!T_CONTENTS) return null;
+  const c = await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' });
+  if (!c) return null;
+  return {
+    contentId: c.contentId, title: c.title ?? '', genre: c.genre ?? '', body: c.body ?? '',
+    publishedAt: c.publishedAt ?? null, updatedAt: c.updatedAt ?? null, sources: c.sources ?? [],
+  };
+}
 
 class ApiError extends Error {
   constructor(status, code, message, details) { super(message); this.status = status; this.code = code; this.details = details; }
@@ -210,26 +239,60 @@ async function competingAdCount(contentId, excludeAdId) {
 }
 
 // ---- コンテンツ紐づけ(F-05) ----
+const LINK_CANDIDATE_LIMIT = 20;
+
+/**
+ * 紐づけ候補(S-03・6.3.2)。
+ * 本線: 媒体の記事ベクトル索引を広告ベクトルでANN検索する(記事は媒体側で埋め込み済み=決定A-1で同一Gemini空間)。
+ *   広告1本の埋め込みだけで済み記事件数に依存しない。contentIdは媒体のarticle_idなので、
+ *   generate-adsが受け取るarticleContentIdsと一致し紐づけ加点が実トラフィックで機能する。
+ * 縮退: 記事ベクトル索引が未設定の環境では、従来のスタンドイン記事テーブルを全件走査して都度埋め込む。
+ */
 async function linkCandidates(s, adId) {
   const ad = await getAdOr404(adId);
   requireOwnership(s, ad);
-  if (!T_CONTENTS) return ok(200, { adId, candidates: [], note: '記事テーブル未接続(媒体側連携で有効化)' });
   const adVec = await embed(adEmbeddingText(ad));
   const linked = new Set((await linksOf(adId)).map((l) => l.SK.slice('LINK#'.length)));
+
+  // 紐づけ済みが上位を占めても候補が枯れないよう多めに取得してから除外する
+  const hits = await queryContentCandidates(adVec, LINK_CANDIDATE_LIMIT + linked.size);
+  if (hits) {
+    const top = hits.filter((h) => !linked.has(h.contentId)).slice(0, LINK_CANDIDATE_LIMIT);
+    const candidates = await Promise.all(top.map(async (h) => ({
+      contentId: h.contentId, title: h.title, genre: h.genre, url: h.url,
+      relevance: round4(h.relevance),
+      citationsPerDay: await citationsPerDay(h.contentId),
+      competingAds: (await competingAdCount(h.contentId, adId)).count,
+    })));
+    return ok(200, { adId, candidates, source: 'vector-index' });
+  }
+
+  if (!T_CONTENTS) return ok(200, { adId, candidates: [], note: '記事ベクトル索引・記事テーブルとも未接続(媒体側連携で有効化)' });
   const contents = (await scan(T_CONTENTS, { filterExpression: 'SK = :m', values: { ':m': 'META' } }))
     .filter((c) => !linked.has(c.contentId));
-  // 関連度で上位10件へ絞ってから競合数を付与(全記事の集計を避ける)
   const scored = await Promise.all(contents.map(async (c) => ({
     c, relevance: round4(cosine(adVec, await embed(contentEmbeddingText(c)))),
   })));
-  const top = scored.sort((a, b) => b.relevance - a.relevance).slice(0, 10);
+  const top = scored.sort((a, b) => b.relevance - a.relevance).slice(0, LINK_CANDIDATE_LIMIT);
   const candidates = await Promise.all(top.map(async ({ c, relevance }) => ({
     contentId: c.contentId, title: c.title, genre: c.genre, relevance,
-    // 引用回数/日は媒体側応答ログ未接続のため0(接続後に有効化。6.3.3節)
-    citationsPerDay: 0,
+    citationsPerDay: await citationsPerDay(c.contentId),
     competingAds: (await competingAdCount(c.contentId, adId)).count,
   })));
-  return ok(200, { adId, candidates });
+  return ok(200, { adId, candidates, source: 'contents-table' });
+}
+
+/**
+ * 記事の引用回数/日(6.3.3): generate-adsが回答生成時に受け取るarticleContentIdsを
+ * daily_stats(PK=CONTENT#{id})へ日次加算したものを、直近7日の平均として返す。
+ */
+async function citationsPerDay(contentId, days = 7) {
+  const rows = await query(T_STATS, `CONTENT#${contentId}`, { skPrefix: 'DATE#' });
+  if (rows.length === 0) return 0;
+  const from = jstDateOffset(-(days - 1));
+  const recent = rows.filter((r) => String(r.SK).slice('DATE#'.length) >= from);
+  const total = recent.reduce((sum, r) => sum + (r.citations ?? 0), 0);
+  return Math.round((total / days) * 10) / 10;
 }
 
 async function putLink(s, adId, contentId, body) {
@@ -287,8 +350,8 @@ async function getReport(s, adId, params) {
 
 // ---- コンテンツ詳細(6.3.3・S-03-1) ----
 async function getContent(s, contentId, params) {
-  if (!T_CONTENTS) throw new ApiError(404, 'API-4041', '記事テーブル未接続(媒体側連携で有効化)');
-  const c = await getItem(T_CONTENTS, { PK: `CONTENT#${contentId}`, SK: 'META' });
+  if (!T_MEDIA_CONTENTS && !T_CONTENTS) throw new ApiError(404, 'API-4041', '記事テーブル未接続(媒体側連携で有効化)');
+  const c = await fetchContent(contentId);
   if (!c) throw new ApiError(404, 'API-4041', 'リソースが存在しません');
   const full = params.get('full') === 'true';
   const body = c.body ?? '';
@@ -297,13 +360,16 @@ async function getContent(s, contentId, params) {
     sources: c.sources ?? [], bodyPreview: full ? body : body.slice(0, 2000), hasMore: !full && body.length > 2000,
   };
   const adId = params.get('adId');
-  // 競合状況(GSI2逆引き)。統計(引用回数/日・質問タイプ内訳)は媒体側応答ログ未接続のため省略(6.3.3節)
+  // 競合状況(GSI2逆引き)+ 引用回数/日(generate-adsが受け取ったarticleContentIdsの日次集計)
   res.competingAds = await competingAdCount(contentId, adId ?? null);
+  res.citationsPerDay = await citationsPerDay(contentId);
   if (adId) {
     const ad = await getItem(T_MASTER, { PK: `AD#${adId}`, SK: 'META' });
     if (ad) {
       requireOwnership(s, ad);
-      res.relevance = round4(cosine(await embed(adEmbeddingText(ad)), await embed(contentEmbeddingText(c))));
+      // 関連度は一覧(ANN)と同じ「媒体が保存済みの記事ベクトル」を使う。取得できない場合のみ再埋め込み
+      const contentVec = await getContentVector(contentId) ?? await embed(contentEmbeddingText(c));
+      res.relevance = round4(cosine(await embed(adEmbeddingText(ad)), contentVec));
       res.matchedKeywords = [...(ad.keywords ?? []), ...(ad.tags ?? [])].filter((kw) => kw && (c.title.includes(kw) || body.includes(kw)));
       const link = await getItem(T_MASTER, { PK: `AD#${adId}`, SK: `LINK#${contentId}` });
       res.linked = !!link;

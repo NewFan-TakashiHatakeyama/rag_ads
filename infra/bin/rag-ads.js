@@ -28,6 +28,12 @@ const embedProvider = app.node.tryGetContext('embedProvider') ?? 'bedrock';
 // -c embedDimension で明示上書き可。S3 Vectorsインデックスも同一次元で作る必要あり(create-vector-index.sh)。
 const embedDimension = Number(app.node.tryGetContext('embedDimension') ?? (embedProvider === 'gemini' ? 3072 : 1024));
 const geminiApiKey = app.node.tryGetContext('geminiApiKey') ?? process.env.RAG_ADS_GEMINI_API_KEY ?? '';
+// 媒体の記事ベクトル索引・記事テーブル(6.3.2/6.3.3)。指定すると紐づけ候補が媒体記事へのANN検索になり、
+// contentIdが媒体のarticle_idに揃うため紐づけ加点(linkBoost)が実トラフィックで一致する。
+// 未指定時はスタンドイン記事テーブルによる従来動作へ縮退する。
+const contentVectorBucket = app.node.tryGetContext('contentVectorBucket') ?? undefined;
+const contentVectorIndex = app.node.tryGetContext('contentVectorIndex') ?? undefined;
+const mediaContentTable = app.node.tryGetContext('mediaContentTable') ?? undefined;
 
 const awsEnv = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -39,6 +45,7 @@ const serviceApiKey = app.node.tryGetContext('serviceApiKey') ?? process.env.RAG
 const apiStack = new ApiStack(app, n.stack('Api'), {
   env: awsEnv, naming: n, dataStack, siteTopUrl, vectorBucketName, corsOrigins,
   embedModelId, embedProvider, embedDimension, geminiApiKey, serviceApiKey,
+  contentVectorBucket, contentVectorIndex, mediaContentTable,
 });
 apiStack.addDependency(dataStack);
 const batchStack = new BatchStack(app, n.stack('Batch'), {

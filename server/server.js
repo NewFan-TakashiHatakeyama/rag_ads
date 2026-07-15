@@ -113,6 +113,10 @@ const routes = [
     const r = admin.updateAd(authenticate(req), m[1], await readBody(req));
     send(res, r.status, r.body);
   }],
+  ['DELETE', /^\/v1\/ads\/([A-Za-z0-9-]+)$/, async (req, res, m) => {
+    const r = admin.deleteAd(authenticate(req), m[1]);
+    send(res, r.status, r.body);
+  }],
   ['PATCH', /^\/v1\/ads\/([A-Za-z0-9-]+)\/status$/, async (req, res, m) => {
     const r = admin.patchStatus(authenticate(req), m[1], await readBody(req));
     send(res, r.status, r.body);

@@ -300,6 +300,8 @@ async function viewAdList() {
     const canLink = !['draft', 'reviewing'].includes(a.status);
     const canPause = a.status === 'delivering';
     const canResubmit = ['paused', 'expired', 'needs_fix'].includes(a.status);
+    // 一度も配信されていない状態のみ削除可(配信済みは課金記録の保全のため停止を使う。API側と同一条件)
+    const canDelete = ['draft', 'needs_fix'].includes(a.status);
     return `<tr>
       <td><div class="ttl">${esc(a.title)}</div><div class="mini">${esc(a.category ?? '—')}</div></td>
       <td>${chips || '<span class="mini">—</span>'}</td>
@@ -313,6 +315,7 @@ async function viewAdList() {
         <button class="btn btn-o btn-s" data-act="report" data-id="${esc(a.adId)}">実績</button>
         ${canPause ? `<button class="btn btn-w btn-s" data-act="pause" data-id="${esc(a.adId)}">停止</button>` : ''}
         ${canResubmit ? `<button class="btn btn-p btn-s" data-act="resubmit" data-id="${esc(a.adId)}">再出稿</button>` : ''}
+        ${canDelete ? `<button class="btn btn-d btn-s" data-act="delete" data-id="${esc(a.adId)}">削除</button>` : ''}
       </td>
     </tr>`;
   };
@@ -335,6 +338,20 @@ async function viewAdList() {
       try {
         await api('PATCH', `/v1/ads/${id}/status`, { to: 'paused' });
         toast('広告を停止しました');
+        load();
+      } catch (e) { toast(apiErrorMessage(e), true); }
+    }
+    if (act === 'delete') {
+      const ad = allAds.find((a) => a.adId === id);
+      const ok = await confirmModal(
+        `「${ad?.title ?? 'この広告'}」を削除しますか？\nこの操作は取り消せません。`,
+        '削除する',
+        'btn-d'
+      );
+      if (!ok) return;
+      try {
+        await api('DELETE', `/v1/ads/${id}`);
+        toast('広告を削除しました');
         load();
       } catch (e) { toast(apiErrorMessage(e), true); }
     }
@@ -472,25 +489,48 @@ async function viewAdForm(adId) {
     draw();
   };
 
+  /**
+   * 進行中の下書き保存。savedAdId は POST の応答を待って初めて確定するため、
+   * 保存が重なると両方が savedAdId=undefined を見て POST し、広告が二重に作られる。
+   * (createAd は出稿スクリーニングで数秒かかるため、この窓は実運用で十分に開く)
+   * 進行中の保存があれば、その Promise に相乗りさせて直列化する。
+   */
+  let savingPromise = null;
+
   const saveDraft = async ({ silent = false } = {}) => {
+    if (savingPromise) return savingPromise;
+    savingPromise = (async () => {
+      try {
+        const body = buildBody(false);
+        let r;
+        if (savedAdId) r = await api('PUT', `/v1/ads/${savedAdId}`, body);
+        else { r = await api('POST', '/v1/ads', body); savedAdId = r.adId; }
+        findings = r.findings ?? [];
+        dirty = false;
+        if (!silent) toast('下書きを保存しました');
+        return true;
+      } catch (e) {
+        if (e.code === 'API-4001' && e.details) { applyServerErrors(e.details); toast(`入力内容に${e.details.length}件の誤りがあります`, true); }
+        else toast(apiErrorMessage(e), true);
+        return false;
+      }
+    })();
     try {
-      const body = buildBody(false);
-      let r;
-      if (savedAdId) r = await api('PUT', `/v1/ads/${savedAdId}`, body);
-      else { r = await api('POST', '/v1/ads', body); savedAdId = r.adId; }
-      findings = r.findings ?? [];
-      dirty = false;
-      if (!silent) toast('下書きを保存しました');
-      return true;
-    } catch (e) {
-      if (e.code === 'API-4001' && e.details) { applyServerErrors(e.details); toast(`入力内容に${e.details.length}件の誤りがあります`, true); }
-      else toast(apiErrorMessage(e), true);
-      return false;
+      return await savingPromise;
+    } finally {
+      savingPromise = null;
     }
   };
 
+  let submitting = false;
+
   const submitAd = async () => {
+    if (submitting) return;
+    submitting = true;
     try {
+      // 進行中の下書き保存があれば待つ。待たずに POST すると savedAdId が未確定のまま
+      // もう1件作られてしまう(下書きと配信中が二重に並ぶ原因)
+      if (savingPromise) await savingPromise;
       const body = buildBody(true);
       if (savedAdId) await api('PUT', `/v1/ads/${savedAdId}`, body);
       else await api('POST', '/v1/ads', body);
@@ -501,6 +541,9 @@ async function viewAdForm(adId) {
     } catch (e) {
       if (e.code === 'API-4001' && e.details) { applyServerErrors(e.details); toast(`入力内容に${e.details.length}件の誤りがあります`, true); }
       else toast(apiErrorMessage(e), true);
+    } finally {
+      // 失敗時に再出稿できるよう必ず解除する(成功時は一覧へ遷移するため影響しない)
+      submitting = false;
     }
   };
 

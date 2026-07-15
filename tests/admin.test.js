@@ -261,3 +261,43 @@ test('classifyQuestion: カテゴリと質問タイプを分類する', () => {
   assert.equal(c3.category, 'その他');
   assert.equal(c3.targetFilterApplicable, false);
 });
+
+// ---- 広告の削除(DELETE /v1/ads/{adId}) ----
+test('DELETE /v1/ads: 下書きを削除できる(一覧から消える)', () => {
+  const adId = makeAd(ADV1, { status: 'draft', topic: '住宅ローン' });
+  const r = admin.deleteAd(ADV1, adId);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.deleted, true);
+  assert.ok(!tables.ads.get(`AD#${adId}`, 'META'), 'META が削除されている');
+  assert.throws(() => admin.getAd(ADV1, adId), (e) => e.code === 'API-4041');
+});
+
+test('DELETE /v1/ads: needs_fix(差戻し)も削除できる', () => {
+  const adId = makeAd(ADV1, { status: 'needs_fix', topic: '住宅ローン' });
+  assert.equal(admin.deleteAd(ADV1, adId).status, 200);
+  assert.ok(!tables.ads.get(`AD#${adId}`, 'META'), 'META が削除されている');
+});
+
+test('DELETE /v1/ads: 配信実績のある広告は削除せずAPI-4091(課金記録の保全)', () => {
+  for (const status of ['delivering', 'paused', 'expired']) {
+    const adId = makeAd(ADV1, { status, topic: '住宅ローン' });
+    assert.throws(() => admin.deleteAd(ADV1, adId), (e) => e.status === 409 && e.code === 'API-4091', status);
+    assert.ok(tables.ads.get(`AD#${adId}`, 'META'), `${status} は削除されず残る`);
+  }
+});
+
+test('DELETE /v1/ads: 審査中は削除できない(審査対象の固定)', () => {
+  const adId = makeAd(ADV1, { status: 'reviewing', topic: '住宅ローン' });
+  assert.throws(() => admin.deleteAd(ADV1, adId), (e) => e.status === 409 && e.code === 'API-4091');
+  assert.ok(tables.ads.get(`AD#${adId}`, 'META'));
+});
+
+test('DELETE /v1/ads: 他広告主の下書きは削除できない(API-4031)', () => {
+  const adId = makeAd(ADV1, { status: 'draft', topic: '住宅ローン' });
+  assert.throws(() => admin.deleteAd(ADV2, adId), (e) => e.status === 403 && e.code === 'API-4031');
+  assert.ok(tables.ads.get(`AD#${adId}`, 'META'));
+});
+
+test('DELETE /v1/ads: 存在しない広告はAPI-4041', () => {
+  assert.throws(() => admin.deleteAd(ADV1, 'NOPE'), (e) => e.status === 404 && e.code === 'API-4041');
+});

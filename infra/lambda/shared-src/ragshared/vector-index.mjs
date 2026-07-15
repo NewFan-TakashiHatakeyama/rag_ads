@@ -72,6 +72,7 @@ export async function queryContentCandidates(adVector, topK) {
       title: m.title ?? '',
       genre: m.category ?? '',
       url: m.url ?? '',
+      pubDate: m.pub_date ?? '', // 記事の新しさによる足切りに使う(YYYY-MM-DD)
       relevance: 1 - (v.distance ?? 1), // cosine距離→類似度
     });
   }

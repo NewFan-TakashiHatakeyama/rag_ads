@@ -35,6 +35,15 @@ const DEFAULT_PARAMS = {
   'lead.enabled': 'true',
   'lead.fallback_text': 'ご質問に関連するサービスのご案内です。',
   'sampling.content_check': '0.10',
+  // ---- 紐づけ候補(S-03・6.3.2)----
+  // 広告↔記事の類似度は、配信で使う質問↔広告より低く出る(短い広告文 vs 長い記事本文のため)。
+  // theta_rel(0.70)を流用すると候補ゼロになるので別パラメータで管理する。
+  // dev実測: 無関連(住宅ローン広告×PR記事)0.58〜0.61 / 関連(AI広告×AI記事)0.63〜0.685 → 0.62
+  'link.theta_rel': '0.62',
+  // 記事の新しさによる足切り(既定30日=媒体のTTL保持期間と一致)
+  'link.recency_days': '30',
+  // 引用実績の加点(同程度の関連度なら引用の多い記事を上位に。関連度を覆さない小さめの値)
+  'link.citation_weight': '0.05',
 };
 
 class ApiStack extends Stack {

@@ -275,15 +275,42 @@ async function linkCandidates(s, adId) {
   // 紐づけ済み・削除済み記事を除いても候補が枯れないよう多めに取得してから絞る
   const hits = await queryContentCandidates(adVec, LINK_CANDIDATE_LIMIT * ANN_OVERFETCH + linked.size);
   if (hits) {
+    const p = await getParams();
+    const minRel = p['link.theta_rel'] ?? 0.62;
+    const recencyFrom = jstDateOffset(-(p['link.recency_days'] ?? 30));
+    const citeWeight = p['link.citation_weight'] ?? 0.05;
+
     const live = await filterLiveContents(hits);
-    const top = live.filter((h) => !linked.has(h.contentId)).slice(0, LINK_CANDIDATE_LIMIT);
-    const candidates = await Promise.all(top.map(async (h) => ({
-      contentId: h.contentId, title: h.title, genre: h.genre, url: h.url,
+    // ① 関連度の下限(広告↔記事の分布に対する閾値。配信のtheta_relとは別)
+    // ② 記事の新しさ(pubDateはANNメタデータ由来。未設定の記事は除外しない)
+    // ③ 紐づけ済みの除外
+    const shortlist = live.filter((h) => h.relevance >= minRel
+      && (!h.pubDate || h.pubDate >= recencyFrom)
+      && !linked.has(h.contentId));
+
+    // ④ 引用実績で優先(同程度の関連度なら引用の多い記事を上位へ)。
+    //    引用数は候補内で正規化し、関連度を覆さない重みで加点する。
+    const cites = await Promise.all(shortlist.map((h) => citationsPerDay(h.contentId)));
+    const maxCite = Math.max(0, ...cites);
+    const scored = shortlist.map((h, i) => ({
+      h,
+      citationsPerDay: cites[i],
+      score: h.relevance + citeWeight * (maxCite > 0 ? cites[i] / maxCite : 0),
+    }));
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.slice(0, LINK_CANDIDATE_LIMIT);
+
+    const candidates = await Promise.all(top.map(async ({ h, citationsPerDay: cpd, score }) => ({
+      contentId: h.contentId, title: h.title, genre: h.genre, url: h.url, pubDate: h.pubDate,
       relevance: round4(h.relevance),
-      citationsPerDay: await citationsPerDay(h.contentId),
+      score: round4(score),
+      citationsPerDay: cpd,
       competingAds: (await competingAdCount(h.contentId, adId)).count,
     })));
-    return ok(200, { adId, candidates, source: 'vector-index' });
+    return ok(200, {
+      adId, candidates, source: 'vector-index',
+      filters: { minRelevance: minRel, pubDateFrom: recencyFrom, citationWeight: citeWeight },
+    });
   }
 
   if (!T_CONTENTS) return ok(200, { adId, candidates: [], note: '記事ベクトル索引・記事テーブルとも未接続(媒体側連携で有効化)' });
@@ -410,6 +437,10 @@ const PARAM_RULES = {
   'lead.min_chars': { type: 'int', min: 1, max: 200 }, 'lead.max_chars': { type: 'int', min: 1, max: 200 },
   'lead.model_id': { type: 'string', max: 200 }, 'lead.enabled': { type: 'boolean' },
   'lead.fallback_text': { type: 'string', min: 1, max: 100 }, 'sampling.content_check': { type: 'number', min: 0, max: 1 },
+  // 紐づけ候補(S-03)。配信のtheta_rel(質問↔広告)とは分布が異なるため別管理
+  'link.theta_rel': { type: 'number', min: 0, max: 1 },
+  'link.recency_days': { type: 'int', min: 1, max: 3650 },
+  'link.citation_weight': { type: 'number', min: 0, max: 1 },
 };
 
 async function getParamsApi() { return ok(200, await getParams()); }

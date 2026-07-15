@@ -10,8 +10,13 @@ const ssm = new SSMClient({});
 
 const NUMERIC = new Set([
   'weights.rel', 'weights.bid', 'weights.link', 'theta_rel', 'sampling.content_check',
+  // 紐づけ候補(S-03)用。配信のtheta_rel(質問↔広告)とは分布が異なるため別管理
+  'link.theta_rel', 'link.citation_weight',
 ]);
-const INTEGER = new Set(['max_slots', 'candidate_topk', 'max_per_advertiser', 'lead.min_chars', 'lead.max_chars']);
+const INTEGER = new Set([
+  'max_slots', 'candidate_topk', 'max_per_advertiser', 'lead.min_chars', 'lead.max_chars',
+  'link.recency_days',
+]);
 const BOOLEAN = new Set(['enabled', 'lead.enabled']);
 
 let cache = null;
